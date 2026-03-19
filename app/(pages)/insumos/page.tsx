@@ -1,6 +1,8 @@
 import { Separator } from "@/components/ui/separator";
 import { columns, Payment } from "./columns"
 import { DataTable } from "./data-table";
+import { Form } from "@/components/form/Form";
+import { Button } from "@/components/ui/button";
 
 async function getData(): Promise<Payment[]> {
   // Fetch data from your API here.
@@ -46,9 +48,13 @@ export default async function Insumos() {
       <h1 className="text-3xl text-center my-5 font-bold">Listado de insumos</h1>
       <DataTable columns={columns} data={data} />
       <Separator orientation="horizontal" className="mt-20"/>
-      <button className="inline-flex text-white bg-green-800 border-0 py-2 px-6 focus:outline-none hover:bg-green-600 rounded text-lg mt-10">
+      <Button 
+      className="inline-flex text-white bg-green-800 border-0 py-2 px-6 focus:outline-none hover:bg-green-600 rounded text-lg mt-10"
+      type="button"
+      >
           Agregar Insumo
-      </button>
+      </Button>
+      <Form/>
     </div>
   )
 }
