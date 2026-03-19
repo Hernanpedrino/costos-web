@@ -1,3 +1,4 @@
+import { Separator } from "@/components/ui/separator";
 import { columns, Payment } from "./columns"
 import { DataTable } from "./data-table";
 
@@ -42,7 +43,12 @@ export default async function Insumos() {
 
   return (
     <div className="container mx-auto py-10">
+      <h1 className="text-3xl text-center my-5 font-bold">Listado de insumos</h1>
       <DataTable columns={columns} data={data} />
+      <Separator orientation="horizontal" className="mt-20"/>
+      <button className="inline-flex text-white bg-green-800 border-0 py-2 px-6 focus:outline-none hover:bg-green-600 rounded text-lg mt-10">
+          Agregar Insumo
+      </button>
     </div>
   )
 }
