@@ -44,13 +44,21 @@ function Button({
   variant = "default",
   size = "default",
   asChild = false,
+  onCustomClick,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
+    onCustomClick?: ()=> void
   }) {
   const Comp = asChild ? Slot.Root : "button"
-
+    const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (onCustomClick) {
+      console.log("Log desde la prop personalizada");
+      onCustomClick();
+    }
+    props.onClick?.(e);
+  };
   return (
     <Comp
       data-slot="button"
@@ -58,6 +66,7 @@ function Button({
       data-size={size}
       className={cn(buttonVariants({ variant, size, className }))}
       {...props}
+      onClick={handleClick}
     />
   )
 }
