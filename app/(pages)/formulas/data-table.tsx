@@ -14,6 +14,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  TableFooter
 } from "@/components/ui/table"
 
 interface DataTableProps<TData, TValue> {
@@ -35,8 +36,8 @@ export function DataTable<TData, TValue>({
 
   return (
     <div className="overflow-hidden rounded-md border shadow-2xl">
-       <div className="bg-muted/50 p-4 border-b">
-        <h2 className="text-xl font-bold tracking-tight">{title}</h2>
+      <div className="bg-muted/50 p-4 border-b">
+        <h2 className="text-xl font-bold tracking-tight">{title.toUpperCase()}</h2>
       </div>
       <Table>
         <TableHeader>
@@ -48,9 +49,9 @@ export function DataTable<TData, TValue>({
                     {header.isPlaceholder
                       ? null
                       : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
                   </TableHead>
                 )
               })}
@@ -79,6 +80,22 @@ export function DataTable<TData, TValue>({
             </TableRow>
           )}
         </TableBody>
+        <TableFooter>
+          {table.getFooterGroups().map((footerGroup) => (
+            <TableRow key={footerGroup.id}>
+              {footerGroup.headers.map((header) => (
+                <TableCell key={header.id} className="font-bold text-right">
+                  {header.isPlaceholder
+                    ? null
+                    : flexRender(
+                      header.column.columnDef.footer,
+                      header.getContext()
+                    )}
+                </TableCell>
+              ))}
+            </TableRow>
+          ))}
+        </TableFooter>
       </Table>
     </div>
   )

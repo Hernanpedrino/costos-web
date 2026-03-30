@@ -20,10 +20,12 @@ export const columns: ColumnDef<Componente>[] = [
   {
     accessorKey: "inputs",
     header: "Insumo",
+    footer: 'Totales'
   },
   {
     accessorKey: "quantity",
     header: "Cantidad",
+    footer: ""
   },
   {
     accessorKey: "price",
@@ -35,6 +37,7 @@ export const columns: ColumnDef<Componente>[] = [
         currency: "ARS",
       }).format(amount)
     },
+    footer: ""
   },
   {
     accessorKey: "total",
@@ -47,6 +50,18 @@ export const columns: ColumnDef<Componente>[] = [
         style: "currency",
         currency: "ARS",
       }).format(total)
+    },
+    footer: ({ table }) => {
+      // Sumamos el (precio * cantidad) de todas las filas visibles
+      const totalGeneral = table.getFilteredRowModel().rows.reduce((sum, row) => {
+        return sum + (row.original.quantity * row.original.price)
+      }, 0)
+
+      return new Intl.NumberFormat("es-AR", {
+        style: "currency",
+        currency: "ARS",
+        fontWeight: "bold"
+      } as any).format(totalGeneral)
     },
   },
 ]
