@@ -20,12 +20,11 @@ export const columns: ColumnDef<Componente>[] = [
   {
     accessorKey: "inputs",
     header: "Insumo",
-    footer: 'Totales'
+    footer: 'Costo del producto'
   },
   {
     accessorKey: "quantity",
     header: "Cantidad",
-    footer: ""
   },
   {
     accessorKey: "price",
@@ -37,7 +36,6 @@ export const columns: ColumnDef<Componente>[] = [
         currency: "ARS",
       }).format(amount)
     },
-    footer: ""
   },
   {
     accessorKey: "total",
@@ -52,16 +50,28 @@ export const columns: ColumnDef<Componente>[] = [
       }).format(total)
     },
     footer: ({ table }) => {
-      // Sumamos el (precio * cantidad) de todas las filas visibles
-      const totalGeneral = table.getFilteredRowModel().rows.reduce((sum, row) => {
-        return sum + (row.original.quantity * row.original.price)
-      }, 0)
+      const rows = table.getFilteredRowModel().rows
 
+      // 1. Calculamos ambas sumas en un solo paso
+      const { sumaTotales, sumaCantidades } = rows.reduce(
+        (acc, row) => {
+          const totalFila = row.original.quantity * row.original.price
+          return {
+            sumaTotales: acc.sumaTotales + totalFila,
+            sumaCantidades: acc.sumaCantidades + row.original.quantity,
+          }
+        },
+        { sumaTotales: 0, sumaCantidades: 0 }
+      )
+
+      // 2. Realizamos la división (evitando dividir por cero)
+      const resultadoFinal = sumaCantidades > 0 ? sumaTotales / sumaCantidades : 0
+
+      // 3. Formateamos como moneda argentina
       return new Intl.NumberFormat("es-AR", {
         style: "currency",
         currency: "ARS",
-        fontWeight: "bold"
-      } as any).format(totalGeneral)
+      }).format(resultadoFinal)
     },
   },
 ]
