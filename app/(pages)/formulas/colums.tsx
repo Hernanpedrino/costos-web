@@ -4,40 +4,49 @@ import { ColumnDef } from "@tanstack/react-table"
 
 // This type is used to define the shape of our data.
 // You can use a Zod schema here if you want.
-export type Formulas = {
+export type Componente = {
   id: string
-  name: string
   inputs: string
   quantity: number
   price: number
-  total: number
   depends_formula: boolean
 }
+export type Formula = {
+  tittle: string,
+  formula: Componente[]
+}
 
-export const columns: ColumnDef<Formulas>[] = [
+export const columns: ColumnDef<Componente>[] = [
   {
-    header: 'Pimenton Cafayate',
-    columns: [
-    {
-      accessorKey: "inputs",
-      header: "Insumos",
+    accessorKey: "inputs",
+    header: "Insumo",
+  },
+  {
+    accessorKey: "quantity",
+    header: "Cantidad",
+  },
+  {
+    accessorKey: "price",
+    header: "Precio Unitario",
+    cell: ({ row }) => {
+      const amount = parseFloat(row.getValue("price"))
+      return new Intl.NumberFormat("es-AR", {
+        style: "currency",
+        currency: "ARS",
+      }).format(amount)
     },
-    {
-      accessorKey: "quantity",
-      header: "Cantidad",
+  },
+  {
+    accessorKey: "total",
+    header: "Total",
+    cell: ({ row }) => {
+      const quantity = row.original.quantity
+      const price = row.original.price
+      const total = quantity * price
+      return new Intl.NumberFormat("es-AR", {
+        style: "currency",
+        currency: "ARS",
+      }).format(total)
     },
-    {
-      accessorKey: "price",
-      header: "Valor insumo"
-    },
-    {
-      accessorKey: "total",
-      header: "Costo"
-    },
-    {
-      accessorKey: "depends_formula",
-      header: "Depende Formula"
-    },
-    ]
-  }
+  },
 ]
