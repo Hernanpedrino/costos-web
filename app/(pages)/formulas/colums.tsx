@@ -63,11 +63,7 @@ export const columns: ColumnDef<Componente>[] = [
         },
         { sumaTotales: 0, sumaCantidades: 0 }
       )
-
-      // 2. Realizamos la división (evitando dividir por cero)
       const resultadoFinal = sumaCantidades > 0 ? sumaTotales / sumaCantidades : 0
-
-      // 3. Formateamos como moneda argentina
       return new Intl.NumberFormat("es-AR", {
         style: "currency",
         currency: "ARS",

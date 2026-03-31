@@ -3,7 +3,6 @@ import { DataTable } from "./data-table";
 import dataMock from "../../../MOCK_DATA.json";
 
 async function getData(): Promise<Formula[]> {
-  // Fetch data from your API here.
   const response = dataMock
   return response;
 }

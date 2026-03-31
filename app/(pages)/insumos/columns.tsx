@@ -4,30 +4,31 @@ import { ColumnDef } from "@tanstack/react-table"
 
 // This type is used to define the shape of our data.
 // You can use a Zod schema here if you want.
-export type Payment = {
+export type Insumos = {
   id: string
-  amount: number
-  status: "pending" | "processing" | "success" | "failed"
-  email: string
+  inputs: string
+  quantity: number
+  price: number
+  depends_formula?: boolean //TODO: Arreglar el tipo luego de tener los datos reales
 }
 
-export const columns: ColumnDef<Payment>[] = [
+export const columns: ColumnDef<Insumos>[] = [
   {
-    accessorKey: "status",
-    header: "Status",
+    accessorKey: "id",
+    header: "Id",
   },
   {
-    accessorKey: "email",
-    header: "Email",
+    accessorKey: "inputs",
+    header: "Insumo",
   },
   {
-    accessorKey: "amount",
-    header: () => <div className="text-right">Amount</div>,
+    accessorKey: "price",
+    header: () => <div className="text-right">Precio</div>,
     cell: ({ row }) => {
-      const amount = parseFloat(row.getValue("amount"))
-      const formatted = new Intl.NumberFormat("en-US", {
+      const amount = parseFloat(row.getValue("price"))
+      const formatted = new Intl.NumberFormat("es-AR", {
         style: "currency",
-        currency: "USD",
+        currency: "ARS",
       }).format(amount)
 
       return <div className="text-right font-medium">{formatted}</div>

@@ -36,7 +36,7 @@ export function DataTable<TData, TValue>({
 
   return (
     <div className="overflow-hidden rounded-md border shadow-2xl">
-      <div className=" text-white bg-green-800 p-4 border-b">
+      <div className=" text-white bg-green-800 p-2 border-b">
         <h2 className="text-xl font-bold tracking-tight">{title.toUpperCase()}</h2>
       </div>
       <Table>

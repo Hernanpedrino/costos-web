@@ -4,9 +4,11 @@ import {
   ColumnDef,
   flexRender,
   getCoreRowModel,
+  getPaginationRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-
+import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
@@ -29,6 +31,7 @@ export function DataTable<TData, TValue>({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
   })
 
   return (
@@ -43,9 +46,9 @@ export function DataTable<TData, TValue>({
                     {header.isPlaceholder
                       ? null
                       : flexRender(
-                          header.column.columnDef.header,
-                          header.getContext()
-                        )}
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
                   </TableHead>
                 )
               })}
@@ -75,6 +78,14 @@ export function DataTable<TData, TValue>({
           )}
         </TableBody>
       </Table>
+      <Separator orientation="horizontal"/>
+      <div className="mt-1 p-5">
+        <Button className="mr-2 bg-green-800 text-white" onClick={() => { table.setPageIndex(0) }}>Primera Pagina</Button>
+        <Button className="mr-2 bg-green-800 text-white" onClick={() => { table.previousPage() }} disabled={!table.getCanPreviousPage()}>Anterior</Button>
+        <Button className="mr-2 bg-green-800 text-white" onClick={() => { table.nextPage() }} disabled={!table.getCanNextPage()}>Siguiente</Button>
+        <Button className="mr-2 bg-green-800 text-white" onClick={() => { table.setPageIndex(table.getPageCount() - 1) }}>Ultima Pagina</Button>
+        <span className="ml-2">Pagina {`${table.getState().pagination.pageIndex + 1} - ${table.getPageCount()}`}</span>
+      </div>
     </div>
   )
 }
