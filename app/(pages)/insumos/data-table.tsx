@@ -5,6 +5,7 @@ import {
   flexRender,
   getCoreRowModel,
   getPaginationRowModel,
+  getFilteredRowModel,
   useReactTable,
 } from "@tanstack/react-table"
 import { Button } from "@/components/ui/button";
@@ -17,25 +18,39 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useState } from "react";
+import { Input } from "@/components/ui/input";
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
   data: TData[]
 }
 
+
 export function DataTable<TData, TValue>({
   columns,
   data,
 }: DataTableProps<TData, TValue>) {
+  const [filtering, setFiltering] = useState("");
   const table = useReactTable({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    state: {
+      globalFilter: filtering
+    },
+    onGlobalFilterChange: setFiltering,
   })
-
   return (
-    <div className="overflow-hidden rounded-md border shadow-2xl">
+    <div className="overflow-hidden rounded-md border shadow-xl">
+      <Input 
+      type="text"
+      placeholder="Buscar Insumo" 
+      className="w-1/4 m-2 border-green-800"
+      onChange={e => setFiltering(e.target.value)}
+      />
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
