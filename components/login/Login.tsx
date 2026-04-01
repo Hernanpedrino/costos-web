@@ -2,9 +2,9 @@
 import Image from 'next/image'
 export const Login = () => {
   return (
-    <div className="w-full h-screen flex items-center justify-center bg-indigo-100">
-        <form className="w-full md:w-1/3 rounded-lg">
-          <div className="flex font-bold justify-center mt-6">
+    <div className="w-full h-screen flex items-center justify-center">
+        <form className="w-full md:w-1/3 border rounded-lg shadow-xl">
+          <div className="flex font-bold justify-center my-6">
             <Image
               src="https://dummyimage.com/64x64"
               alt="Picture of the author"
@@ -12,7 +12,7 @@ export const Login = () => {
               height={64}
             />
           </div>
-          <h2 className="text-2xl text-center text-gray-200 mb-8">Login</h2>
+          <h2 className="text-2xl text-center font-bold mb-8">Login</h2>
           <div className="px-12 pb-10">
             <div className="w-full mb-2">
               <div className="flex items-center">
@@ -55,8 +55,8 @@ export const Login = () => {
                   py-2
                   mt-8
                   rounded-full
-                  bg-blue-400
-                  text-gray-100
+                  bg-green-800
+                  text-white
                   focus:outline-none
                 "
             >
