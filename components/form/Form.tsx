@@ -51,7 +51,7 @@ export const Form = () => {
 
   return (
     <div className="text-2xl mt-5">
-      <Card className="w-full sm:max-w-md mt-3">
+      <Card className="w-full sm:max-w-md mt-3 shadow-xl">
         <CardHeader>
           <CardTitle>Carga de nuevo insumo</CardTitle>
         </CardHeader>
@@ -102,10 +102,6 @@ export const Form = () => {
                         </InputGroupText>
                       </InputGroupAddon>
                     </InputGroup>
-                    <FieldDescription>
-                      Include steps to reproduce, expected behavior, and what
-                      actually happened.
-                    </FieldDescription>
                     {fieldState.invalid && (
                       <FieldError errors={[fieldState.error]} />
                     )}
