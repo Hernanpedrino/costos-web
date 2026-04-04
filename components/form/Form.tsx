@@ -19,7 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 
 const formSchema = z.object({
-  title: z
+  name: z
     .string()
     .min(5, "El nombre debe tener al menos 5 caracteres")
     .max(32, "El nombre no debe tener mas de 32 caracteres"),
@@ -37,7 +37,7 @@ export const Form = () => {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      title: "",
+      name: "",
       suplier: "",
       price: "",
     },
@@ -58,7 +58,7 @@ export const Form = () => {
           <form id="form-insumos" onSubmit={form.handleSubmit(onSubmit)}>
             <FieldGroup>
               <Controller
-                name="title"
+                name="name"
                 control={form.control}
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
