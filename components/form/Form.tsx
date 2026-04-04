@@ -12,28 +12,25 @@ import {
 } from "@/components/ui/card";
 import {
   Field,
-  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupText,
-  InputGroupTextarea,
-} from "@/components/ui/input-group";
 
 const formSchema = z.object({
   title: z
     .string()
-    .min(5, "Bug title must be at least 5 characters.")
-    .max(32, "Bug title must be at most 32 characters."),
-  description: z
+    .min(5, "El nombre debe tener al menos 5 caracteres")
+    .max(32, "El nombre no debe tener mas de 32 caracteres"),
+  suplier: z
     .string()
-    .min(20, "Description must be at least 20 characters.")
-    .max(100, "Description must be at most 100 characters."),
+    .min(3, "El nombre debe tener al menos 5 caracteres")
+    .max(32, "El nombre no debe tener mas de 32 caracteres"),
+  price: z
+    .string()
+    .min(3, "El nombre debe tener al menos 5 caracteres")
+    .max(32, "El nombre no debe tener mas de 32 caracteres"),
 });
 
 export const Form = () => {
@@ -41,11 +38,13 @@ export const Form = () => {
     resolver: zodResolver(formSchema),
     defaultValues: {
       title: "",
-      description: "",
+      suplier: "",
+      price: "",
     },
   });
   function onSubmit(data: z.infer<typeof formSchema>) {
-    console.log("Nuevo insumo ingresado", data);
+    const precio = Number(data.price)
+    console.log("Nuevo insumo ingresado", data, precio);
     form.reset();
   }
 
@@ -64,13 +63,13 @@ export const Form = () => {
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
                     <FieldLabel htmlFor="form-rhf-demo-title">
-                      Nombre
+                      Nombre del insumo
                     </FieldLabel>
                     <Input
                       {...field}
                       id="form-rhf-demo-title"
                       aria-invalid={fieldState.invalid}
-                      placeholder="Login button not working on mobile"
+                      placeholder="Aji molido"
                       autoComplete="off"
                     />
                     {fieldState.invalid && (
@@ -80,28 +79,41 @@ export const Form = () => {
                 )}
               />
               <Controller
-                name="description"
+                name="suplier"
+                control={form.control}
+                render={({ field, fieldState }) => (
+                  <Field data-invalid={fieldState.invalid}>
+                    <FieldLabel htmlFor="form-rhf-demo-title">
+                      Proveedor
+                    </FieldLabel>
+                    <Input
+                      {...field}
+                      id="form-rhf-demo-title"
+                      aria-invalid={fieldState.invalid}
+                      placeholder="Alimentos del plata"
+                      autoComplete="off"
+                    />
+                    {fieldState.invalid && (
+                      <FieldError errors={[fieldState.error]} />
+                    )}
+                  </Field>
+                )}
+              />
+              <Controller
+                name="price"
                 control={form.control}
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
                     <FieldLabel htmlFor="form-rhf-demo-description">
-                      Descripcion
+                      Precio
                     </FieldLabel>
-                    <InputGroup>
-                      <InputGroupTextarea
-                        {...field}
-                        id="form-rhf-demo-description"
-                        placeholder="I'm having an issue with the login button on mobile."
-                        rows={6}
-                        className="min-h-24 resize-none"
-                        aria-invalid={fieldState.invalid}
-                      />
-                      <InputGroupAddon align="block-end">
-                        <InputGroupText className="tabular-nums">
-                          {field.value.length}/100 characters
-                        </InputGroupText>
-                      </InputGroupAddon>
-                    </InputGroup>
+                    <Input
+                      {...field}
+                      id="form-rhf-demo-title"
+                      aria-invalid={fieldState.invalid}
+                      placeholder="4500"
+                      autoComplete="off"
+                    />
                     {fieldState.invalid && (
                       <FieldError errors={[fieldState.error]} />
                     )}
