@@ -1,7 +1,6 @@
 "use client";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Controller, useForm } from "react-hook-form";
-import * as z from "zod";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,6 +16,8 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import * as z from "zod";
+import * as apiInputs from "@/app/(pages)/insumos/helper/insumos";
 
 const formSchema = z.object({
   name: z
@@ -43,8 +44,7 @@ export const Form = () => {
     },
   });
   function onSubmit(data: z.infer<typeof formSchema>) {
-    const precio = Number(data.price)
-    console.log("Nuevo insumo ingresado", data, precio);
+    apiInputs.createInput(data.name, data.suplier, data.price);
     form.reset();
   }
 
@@ -125,12 +125,12 @@ export const Form = () => {
         </CardContent>
         <CardFooter>
           <Field orientation="horizontal">
-            <Button 
-            type="submit" 
-            className="inline-flex text-white bg-green-800 border-0 py-2 px-6 focus:outline-none hover:bg-green-600 rounded text-sm mt-10"
-            form="form-insumos"
+            <Button
+              type="submit"
+              className="inline-flex text-white bg-green-800 border-0 py-2 px-6 focus:outline-none hover:bg-green-600 rounded text-sm mt-10"
+              form="form-insumos"
             >
-                Agregar Insumo
+              Agregar Insumo
             </Button>
           </Field>
         </CardFooter>

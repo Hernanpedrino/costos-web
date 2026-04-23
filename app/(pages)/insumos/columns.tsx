@@ -1,25 +1,28 @@
 "use client"
-
 import { ColumnDef } from "@tanstack/react-table"
-
-// This type is used to define the shape of our data.
-// You can use a Zod schema here if you want.
 export type Insumos = {
-  id: string
-  inputs: string
-  quantity: number
-  price: number
-  depends_formula?: boolean //TODO: Arreglar el tipo luego de tener los datos reales
+  name: string;
+  id: string;
+  suplier: string;
+  price: string;
+  createdAt: Date;
+  updatedAt: Date;
+  // depends_formula?: boolean //TODO: Arreglar el tipo luego de tener los datos reales
 }
 
 export const columns: ColumnDef<Insumos>[] = [
   {
-    accessorKey: "id",
-    header: "Id",
+    accessorKey: "name",
+    header: "Insumo",
   },
   {
-    accessorKey: "inputs",
-    header: "Insumo",
+    accessorKey: "createdAt",
+    header: "Fecha de creacion",
+  },
+  {
+    accessorKey: "updatedAt",
+    header: "Fecha de ultima modificacion"
+    //TODO: Corregir el formato de la fecha
   },
   {
     accessorKey: "price",

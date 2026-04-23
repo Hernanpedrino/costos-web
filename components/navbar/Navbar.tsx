@@ -18,9 +18,6 @@ export const Navbar = () => {
           <Link href={'/home'} className="mr-5 hover:text-gray-900">Estadisticas</Link>
           <Link href={'/home'} className="mr-5 hover:text-gray-900">Informes</Link>
         </nav>
-        <div className="relative">
-          <input type="search" placeholder="Buscar" className="w-full bg-white rounded border border-blue-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 text-base outline-none text-gray-700 py-1 px-3 leading-8 transition-colors duration-200 ease-in-out" />
-        </div>
       </div>
     </header>
   )
