@@ -2,7 +2,6 @@ import { Separator } from "@/components/ui/separator";
 import { columns, Insumos as DataInsumos } from "./columns"
 import { DataTable } from "./data-table";
 import { Form } from "@/components/form/Form";
-import fakeData from "../../../MOCK_DATA _INSUMO.json";
 import { prisma } from "@/lib/prisma";
 
 async function getData(): Promise<DataInsumos[]> {
