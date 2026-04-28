@@ -10,7 +10,7 @@ async function getData(): Promise<DataInsumos[]> {
 }
 
 export default async function Insumos() {
-  const data = await getData()
+  const data = await getData();
   return (
     <div className="container mx-auto px-2 py-10">
       <h1 className="text-3xl text-center my-5 font-bold">Listado de productos e insumos</h1>

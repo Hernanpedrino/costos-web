@@ -1,9 +1,6 @@
 "use client"
 
 import { ColumnDef } from "@tanstack/react-table"
-
-// This type is used to define the shape of our data.
-// You can use a Zod schema here if you want.
 export type Componente = {
   id: string
   inputs: string
@@ -51,8 +48,6 @@ export const columns: ColumnDef<Componente>[] = [
     },
     footer: ({ table }) => {
       const rows = table.getFilteredRowModel().rows
-
-      // 1. Calculamos ambas sumas en un solo paso
       const { sumaTotales, sumaCantidades } = rows.reduce(
         (acc, row) => {
           const totalFila = row.original.quantity * row.original.price

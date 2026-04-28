@@ -17,7 +17,12 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import * as z from "zod";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+type FormValues = z.infer<typeof formSchema>
+
+const listaInsumosDB = [{ id: "1", nombre: "Harina" }, { id: "2", nombre: "Azúcar" }];
+
 const formSchema = z.object({
   name: z
     .string()
@@ -28,8 +33,9 @@ const formSchema = z.object({
       cantidad: z.string().min(1, "Requerido"),
     }))
 });
-type FormValues = z.infer<typeof formSchema>
+
 export const NewFormulaForm = () => {
+  
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -37,27 +43,30 @@ export const NewFormulaForm = () => {
       insumos: [],
     },
   });
+
   const { fields, replace } = useFieldArray({
     control: form.control,
-    name: "insumos", // Nombre del array en el schema
+    name: "insumos",
   });
+
   const onSubmit = (data: FormValues) => {
     console.log("Datos enviados:", data);
     form.reset();
   }
+
   const handleSelectChange = (val: string) => {
     const cantidad = parseInt(val, 10);
     if (isNaN(cantidad)) return;
-
-    const nuevosCampos = Array.from({ length: cantidad }, () => ({
-      nombreInsumo: "",
-      cantidad: "",
-    }));
+    const valoresActuales = form.getValues("insumos") || [];
+    const nuevosCampos = Array.from({ length: cantidad }, (_, index) => {
+      return valoresActuales[index] || { nombreInsumo: "", cantidad: "" };
+    });
     replace(nuevosCampos);
   };
+
   return (
     <div className="text-2xl w-1/2">
-      <Card className="w-full mt-3 shadow-xl">
+      <Card className="w-full shadow-xl">
         <CardHeader>
           <CardTitle>Nueva Formula</CardTitle>
         </CardHeader>
@@ -104,32 +113,43 @@ export const NewFormulaForm = () => {
                 {fields.map((field, index) => (
                   <div key={field.id} className="p-4 border rounded-lg space-y-4">
                     <h4 className="font-medium text-sm">Insumo #{index + 1}</h4>
-
                     <Controller
                       name={`insumos.${index}.nombreInsumo`}
                       control={form.control}
                       render={({ field, fieldState }) => (
                         <Field data-invalid={fieldState.invalid}>
                           <FieldLabel>Insumo</FieldLabel>
-                          <Input {...field} 
-                          placeholder="Alimentos del plata"
-                          value={field.value ?? ""}
-                           />
+                          <Select
+                            onValueChange={field.onChange}
+                            value={field.value ?? ""}
+                          >
+                            <SelectTrigger aria-invalid={fieldState.invalid}>
+                              <SelectValue placeholder="Seleccione un insumo" />
+                            </SelectTrigger>
+
+                            <SelectContent>
+                              {/* FIXME: Traer los datos desde prisma */}
+                              {listaInsumosDB.map((insumo) => (
+                                <SelectItem key={insumo.id} value={insumo.nombre}>
+                                  {insumo.nombre}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                         </Field>
                       )}
                     />
-
                     <Controller
                       name={`insumos.${index}.cantidad`}
                       control={form.control}
                       render={({ field, fieldState }) => (
                         <Field data-invalid={fieldState.invalid}>
                           <FieldLabel>Cantidad</FieldLabel>
-                          <Input {...field} 
-                          placeholder="4500" 
-                          value={field.value ?? ""}
-                           />
+                          <Input {...field}
+                            placeholder="4500"
+                            value={field.value ?? ""}
+                          />
                           {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                         </Field>
                       )}
