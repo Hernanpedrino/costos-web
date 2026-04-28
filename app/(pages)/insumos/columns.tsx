@@ -13,7 +13,7 @@ export type Insumos = {
 export const columns: ColumnDef<Insumos>[] = [
   {
     accessorKey: "name",
-    header: "Insumo",
+    header: "Producto/Insumo",
   },
   {
     accessorKey: "createdAt",
