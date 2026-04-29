@@ -5,8 +5,14 @@ import { Form } from "@/components/form/Form";
 import { prisma } from "@/lib/prisma";
 
 async function getData(): Promise<DataInsumos[]> {
-  const response = await prisma.inputs.findMany();
-  return response;
+  const response = await prisma.insumo.findMany({
+    orderBy: { name: 'asc' }
+  });
+  const formatedInsumo = response.map(insumo => ({
+    ...insumo,
+    price: Number(insumo.price)
+  }))
+  return formatedInsumo;
 }
 
 export default async function Insumos() {

@@ -1,19 +1,19 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../node_modules/.prisma/client"
+  output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "mysql"
 }
-
 model Insumo {
-  id        String   @id @default(uuid())
-  name      String   
-  suplier   String?
+  id        String   @id @default(uuid()) // Genera automáticamente un string UUID
+  name      String   @unique
+  suplier   String
   price     Decimal  @db.Decimal(10, 2)
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt @default(now())
+  updatedAt DateTime @updatedAt
+
   usadoEn   FormulaDetalle[]
 }
 
@@ -22,7 +22,9 @@ model Formula {
   name      String   @unique @db.VarChar(32)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
   items     FormulaDetalle[]
+
   // Relación: Cuando esta fórmula se usa como ingrediente
   comoIngrediente FormulaDetalle[] @relation("SubFormula")
 }
@@ -30,12 +32,15 @@ model Formula {
 model FormulaDetalle {
   id        String   @id @default(uuid())
   cantidad  String 
+
   // Relación con la fórmula "padre"
   formulaId String
   formula   Formula @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+
   // El ingrediente puede ser un Insumo (UUID)
   insumoId  String?
   insumo    Insumo? @relation(fields: [insumoId], references: [id])
+
   // O el ingrediente puede ser otra Fórmula (UUID)
   subFormulaId String?
   subFormula   Formula? @relation("SubFormula", fields: [subFormulaId], references: [id])

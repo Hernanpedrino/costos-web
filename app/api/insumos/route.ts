@@ -1,13 +1,14 @@
+
 import { prisma } from '@/lib/prisma';
-import { NextResponse, NextRequest } from 'next/server'
+import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const newIput = await prisma.inputs.create({ data: body });
+  const newIput = await prisma.insumo.create(body)
   return NextResponse.json(newIput);
 }
 
 export async function GET(request:Request) {
-  const inputs = await prisma.inputs.findMany();
-  return NextResponse.json(inputs);
+  const insumos = await prisma.insumo.findMany()
+  return NextResponse.json(insumos);
 }

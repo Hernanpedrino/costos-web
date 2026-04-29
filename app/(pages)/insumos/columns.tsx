@@ -1,13 +1,13 @@
 "use client"
+
 import { ColumnDef } from "@tanstack/react-table";
 export type Insumos = {
   name: string;
   id: string;
   suplier: string;
-  price: string;
+  price: number;
   createdAt: Date;
   updatedAt: Date;
-  // depends_formula?: boolean //TODO: Arreglar el tipo luego de tener los datos reales
 }
 
 export const columns: ColumnDef<Insumos>[] = [
