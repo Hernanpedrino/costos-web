@@ -1,19 +1,18 @@
-import { prisma } from "@/lib/prisma";
+
+import { getInsumosAction } from "@/actions/insumos";
 import { NewFormulaForm } from "./newFormulaForm";
 
 type DataInsumos = {
   name: string;
   id: string;
   suplier: string;
-  price: string;
+  price: number;
   createdAt: Date;
   updatedAt: Date;
 } 
 
 async function getData(): Promise<DataInsumos[]> {
-  const response = await prisma.inputs.findMany({
-    orderBy: { name: "asc" }
-  });
+  const response = await getInsumosAction();
   return response;
 }
 

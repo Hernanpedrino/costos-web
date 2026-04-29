@@ -20,17 +20,17 @@ import * as z from "zod";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type FormValues = z.infer<typeof formSchema>
-interface Insumo {
+type DataInsumos = {
   name: string;
   id: string;
   suplier: string;
-  price: string;
+  price: number;
   createdAt: Date;
   updatedAt: Date;
-}
+} 
 
 interface NewFormulaFormProps {
-  listaInsumosDB: Insumo[];
+  listaInsumosDB: DataInsumos[];
 }
 const formSchema = z.object({
   name: z

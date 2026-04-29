@@ -1,6 +1,6 @@
 "use client";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, Resolver, useForm } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,34 +17,35 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import * as z from "zod";
-import * as apiInputs from "@/app/(pages)/insumos/helper/insumos";
+import { createInsumoAction } from "@/actions/insumos";
 
 const formSchema = z.object({
   name: z
     .string()
-    .min(5, "El nombre debe tener al menos 5 caracteres")
+    .min(2, "El nombre debe tener al menos 2 caracteres")
     .max(32, "El nombre no debe tener mas de 32 caracteres"),
   suplier: z
     .string()
-    .min(3, "El nombre debe tener al menos 5 caracteres")
+    .min(3, "El nombre debe tener al menos 3 caracteres")
     .max(32, "El nombre no debe tener mas de 32 caracteres"),
   price: z
-    .string()
-    .min(3, "El nombre debe tener al menos 5 caracteres")
-    .max(32, "El nombre no debe tener mas de 32 caracteres"),
+    .coerce
+    .number()
+    .positive("El precio debe ser mayor a 0"),
 });
+type InsumoFormValues = z.infer<typeof formSchema>;
 
 export const Form = () => {
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
+  const form = useForm<InsumoFormValues>({
+    resolver: zodResolver(formSchema) as Resolver<InsumoFormValues>,
     defaultValues: {
       name: "",
       suplier: "",
-      price: "",
+      price: 0,
     },
   });
-  function onSubmit(data: z.infer<typeof formSchema>) {
-    apiInputs.createInput(data.name, data.suplier, data.price);
+  async function onSubmit(data: z.infer<typeof formSchema>) {
+    const result = await createInsumoAction(data);
     form.reset();
   }
 
@@ -113,6 +114,7 @@ export const Form = () => {
                       aria-invalid={fieldState.invalid}
                       placeholder="4500"
                       autoComplete="off"
+                      type="number"
                     />
                     {fieldState.invalid && (
                       <FieldError errors={[fieldState.error]} />
