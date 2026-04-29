@@ -20,9 +20,18 @@ import * as z from "zod";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type FormValues = z.infer<typeof formSchema>
+interface Insumo {
+  name: string;
+  id: string;
+  suplier: string;
+  price: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
-const listaInsumosDB = [{ id: "1", nombre: "Harina" }, { id: "2", nombre: "Azúcar" }];
-
+interface NewFormulaFormProps {
+  listaInsumosDB: Insumo[];
+}
 const formSchema = z.object({
   name: z
     .string()
@@ -34,8 +43,8 @@ const formSchema = z.object({
     }))
 });
 
-export const NewFormulaForm = () => {
-  
+export const NewFormulaForm = ({ listaInsumosDB }: NewFormulaFormProps) => {
+
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -130,8 +139,8 @@ export const NewFormulaForm = () => {
                             <SelectContent>
                               {/* FIXME: Traer los datos desde prisma */}
                               {listaInsumosDB.map((insumo) => (
-                                <SelectItem key={insumo.id} value={insumo.nombre}>
-                                  {insumo.nombre}
+                                <SelectItem key={insumo.id} value={insumo.name}>
+                                  {insumo.name}
                                 </SelectItem>
                               ))}
                             </SelectContent>
