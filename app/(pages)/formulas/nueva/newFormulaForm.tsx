@@ -137,9 +137,8 @@ export const NewFormulaForm = ({ listaInsumosDB }: NewFormulaFormProps) => {
                             </SelectTrigger>
 
                             <SelectContent>
-                              {/* FIXME: Traer los datos desde prisma */}
                               {listaInsumosDB.map((insumo) => (
-                                <SelectItem key={insumo.id} value={insumo.name}>
+                                <SelectItem key={insumo.id} value={insumo.id}>
                                   {insumo.name}
                                 </SelectItem>
                               ))}
