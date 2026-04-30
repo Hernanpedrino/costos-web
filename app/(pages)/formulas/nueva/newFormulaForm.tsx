@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import * as z from "zod";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { createFormulaAction } from "@/actions/formulas";
 
 type FormValues = z.infer<typeof formSchema>
 type DataInsumos = {
@@ -58,8 +59,9 @@ export const NewFormulaForm = ({ listaInsumosDB }: NewFormulaFormProps) => {
     name: "insumos",
   });
 
-  const onSubmit = (data: FormValues) => {
-    console.log("Datos enviados:", data);
+  const onSubmit = async (data: FormValues) => {
+    const createFormula = await createFormulaAction(data)
+    console.log("Datos enviados:", data, createFormula);
     form.reset();
   }
 

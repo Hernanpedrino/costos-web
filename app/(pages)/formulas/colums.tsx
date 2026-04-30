@@ -1,33 +1,29 @@
 "use client"
 
 import { ColumnDef } from "@tanstack/react-table"
-export type Componente = {
-  id: string
-  inputs: string
-  quantity: number
-  price: number
-  depends_formula: boolean
-}
-export type Formula = {
-  tittle: string,
-  formula: Componente[]
+
+export type ItemFila = {
+  id: string;
+  cantidad: string;
+  nombreIngrediente: string;
+  precioInsumo: number | null;
 }
 
-export const columns: ColumnDef<Componente>[] = [
+export const columns: ColumnDef<ItemFila>[] = [
   {
-    accessorKey: "inputs",
+    accessorKey: "nombreIngrediente",
     header: "Insumo",
     footer: 'Costo del producto'
   },
   {
-    accessorKey: "quantity",
+    accessorKey: "cantidad",
     header: "Cantidad",
   },
   {
-    accessorKey: "price",
+    accessorKey: "precioInsumo",
     header: "Precio Unitario",
     cell: ({ row }) => {
-      const amount = parseFloat(row.getValue("price"))
+      const amount = parseFloat(row.getValue("precioInsumo"))
       return new Intl.NumberFormat("es-AR", {
         style: "currency",
         currency: "ARS",
@@ -38,8 +34,8 @@ export const columns: ColumnDef<Componente>[] = [
     accessorKey: "total",
     header: "Total",
     cell: ({ row }) => {
-      const quantity = row.original.quantity
-      const price = row.original.price
+      const quantity = Number(row.original.cantidad)
+      const price = Number(row.original.precioInsumo)
       const total = quantity * price
       return new Intl.NumberFormat("es-AR", {
         style: "currency",
@@ -50,10 +46,10 @@ export const columns: ColumnDef<Componente>[] = [
       const rows = table.getFilteredRowModel().rows
       const { sumaTotales, sumaCantidades } = rows.reduce(
         (acc, row) => {
-          const totalFila = row.original.quantity * row.original.price
+          const totalFila = Number(row.original.cantidad) * Number(row.original.precioInsumo)
           return {
             sumaTotales: acc.sumaTotales + totalFila,
-            sumaCantidades: acc.sumaCantidades + row.original.quantity,
+            sumaCantidades: acc.sumaCantidades + Number(row.original.cantidad),
           }
         },
         { sumaTotales: 0, sumaCantidades: 0 }

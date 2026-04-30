@@ -1,16 +1,19 @@
-import { columns, Formula } from "./colums";
+import { columns, ItemFila } from "./colums";
 import { DataTable } from "./data-table";
 import dataMock from "../../../MOCK_DATA.json";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { getFormulasAction } from "@/actions/formulas";
 
-async function getData(): Promise<Formula[]> {
-  const response = dataMock
-  return response;
-}
+// async function getData(): Promise<ItemFila[]> {
+//   const response = getFormulasAction();
+//   return response;
+// }
 
 export default async function () {
-  const data = await getData();
+
+  const formulas = await getFormulasAction();
+
   return (
     <div className="flex flex-col items-center">
       <Link href={"/formulas/nueva"}>
@@ -24,9 +27,9 @@ export default async function () {
         </Button>
       </Link>
       {
-        data.map((tabla, index) => (
+        formulas.map((tabla, index) => (
           <div className="p-10 w-3/4" key={index}>
-            <DataTable columns={columns} data={tabla.formula} title={tabla.tittle} />
+            <DataTable columns={columns} data={tabla.items} title={tabla.name} />
           </div>
         ))
       }
