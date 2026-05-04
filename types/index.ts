@@ -11,6 +11,7 @@
  *  4. Unión discriminada del ingrediente
  *  5. DTOs (create / update / form)
  *  6. Respuestas de API
+ *  7. Helpers de serialización
  */
 
 import type { Prisma } from "@/generated/prisma";
@@ -66,7 +67,7 @@ export type FormulaDetalleRaw = Prisma.FormulaDetalleGetPayload<Record<string, n
 
 export interface FormulaDetalle {
   id: UUID;
-  cantidad: string;
+  cantidad: number;       // ← Decimal serializado a number (era string)
   formulaId: UUID;
   insumoId: UUID | null;
   subFormulaId: UUID | null;
@@ -188,7 +189,7 @@ export function normalizarDetalle(
 ): FormulaDetalleDiscriminado {
   const base: FormulaDetalle = {
     id: raw.id,
-    cantidad: raw.cantidad,
+    cantidad: raw.cantidad.toNumber(), // ← Decimal → number
     formulaId: raw.formulaId,
     insumoId: raw.insumoId,
     subFormulaId: raw.subFormulaId,
@@ -239,6 +240,11 @@ export interface UpdateInsumoDTO extends Partial<CreateInsumoDTO> {
 // — Formula ———————————————————————————
 
 export interface CreateFormulaDetalleDTO {
+  /**
+   * cantidad como string mientras vive en el formulario.
+   * Se convierte a Prisma.Decimal en la action antes de guardar,
+   * igual que price en CreateInsumoDTO.
+   */
   cantidad: string;
   /** Exactamente uno de los dos debe estar presente */
   insumoId?: UUID;
@@ -279,8 +285,6 @@ export interface PaginatedResponse<T> {
   pageSize: number;
 }
 
-// Tipos de respuesta específicos
-
 export type InsumoResponse = ApiResponse<Insumo>;
 export type InsumosResponse = ApiResponse<Insumo[]>;
 export type InsumosPaginadosResponse = PaginatedResponse<Insumo>;
@@ -290,7 +294,7 @@ export type FormulasResponse = ApiResponse<Formula[]>;
 export type FormulaDetalleResponse = ApiResponse<FormulaDetalleDiscriminado[]>;
 
 // ─────────────────────────────────────────────────────────────
-// HELPERS DE SERIALIZACIÓN
+// 7. HELPERS DE SERIALIZACIÓN
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -298,9 +302,8 @@ export type FormulaDetalleResponse = ApiResponse<FormulaDetalleDiscriminado[]>;
  * Llamá esto en tus Server Actions o API routes antes de devolver datos al cliente.
  *
  * @example
- * // En un Server Action o API route:
  * const raw = await prisma.insumo.findUniqueOrThrow({ where: { id } });
- * return serializarInsumo(raw);
+ * return serializarInsumo(raw); // → Insumo (sin Decimal, sin Date)
  */
 export function serializarInsumo(raw: InsumoRaw): Insumo {
   return {

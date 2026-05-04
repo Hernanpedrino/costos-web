@@ -17,20 +17,67 @@ type ActionResult<T> =
   | { success: false; error: string };
 
 // ─── View model para la lista de fórmulas ────────────────────────────────────
-// Esta forma "aplanada" es específica de la vista de lista.
-// Exportala para tiparla en los componentes que la consuman.
 
 export interface FormulaListItem {
   id: string;
   name: string;
-  createdAt: ISODateString; // ← string, no Date — serializable a Client Components
+  createdAt: ISODateString;
   items: {
     id: string;
-    cantidad: string;
+    cantidad: number;          // ← Decimal serializado a number
     nombreIngrediente: string;
-    // null cuando el ingrediente es una sub-fórmula (no tiene precio propio)
-    precioInsumo: number | null;
+    precioIngrediente: number; // precio unitario del insumo O de la sub-fórmula
   }[];
+  precioTotal: number;         // Σ (precioIngrediente × cantidad)
+}
+
+// ─── Tipo auxiliar para la query profunda ────────────────────────────────────
+
+type FormulaDetalleConIngrediente = Prisma.FormulaDetalleGetPayload<{
+  include: {
+    insumo: true;
+    subFormula: {
+      include: {
+        items: {
+          include: {
+            insumo: true;
+            subFormula: {
+              include: {
+                items: {
+                  include: { insumo: true };
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+}>;
+
+// ─── Cálculo recursivo de precio ─────────────────────────────────────────────
+
+function calcularPrecioDetalle(item: FormulaDetalleConIngrediente): number {
+  if (item.insumo) {
+    return item.insumo.price.toNumber();
+  }
+
+  if (item.subFormula) {
+    return item.subFormula.items.reduce((total, subItem) => {
+      const cantidad = subItem.cantidad.toNumber(); // ← era parseFloat(string)
+      const precio = subItem.insumo
+        ? subItem.insumo.price.toNumber()
+        : subItem.subFormula
+        ? subItem.subFormula.items.reduce((t, i) => {
+            const c = i.cantidad.toNumber(); // ← era parseFloat(string)
+            return t + (i.insumo ? i.insumo.price.toNumber() : 0) * c;
+          }, 0)
+        : 0;
+      return total + precio * cantidad;
+    }, 0);
+  }
+
+  return 0;
 }
 
 // ─── GET (lista) ──────────────────────────────────────────────────────────────
@@ -41,26 +88,52 @@ export async function getFormulasAction(): Promise<FormulaListItem[]> {
       items: {
         include: {
           insumo: true,
-          subFormula: true,
+          subFormula: {
+            include: {
+              items: {
+                include: {
+                  insumo: true,
+                  subFormula: {
+                    include: {
+                      items: {
+                        include: { insumo: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     },
     orderBy: { createdAt: "desc" },
   });
 
-  return formulas.map((formula) => ({
-    id: formula.id,
-    name: formula.name,
-    createdAt: formula.createdAt.toISOString(), // ← Date → string
-    items: formula.items.map((item) => ({
-      id: item.id,
-      cantidad: item.cantidad,
-      nombreIngrediente:
-        item.insumo?.name ?? item.subFormula?.name ?? "Desconocido",
-      // Usamos null (no 0) para sub-fórmulas — 0 puede confundirse con precio real
-      precioInsumo: item.insumo ? item.insumo.price.toNumber() : null,
-    })),
-  }));
+  return formulas.map((formula) => {
+    const items = formula.items.map((item) => {
+      const precioIngrediente = calcularPrecioDetalle(item);
+      const cantidad = item.cantidad.toNumber(); // ← era parseFloat(string)
+      return {
+        id: item.id,
+        cantidad,
+        nombreIngrediente:
+          item.insumo?.name ?? item.subFormula?.name ?? "Desconocido",
+        precioIngrediente,
+        _subtotal: precioIngrediente * cantidad,
+      };
+    });
+
+    const precioTotal = items.reduce((total, item) => total + item._subtotal, 0);
+
+    return {
+      id: formula.id,
+      name: formula.name,
+      createdAt: formula.createdAt.toISOString(),
+      items: items.map(({ _subtotal: _, ...rest }) => rest),
+      precioTotal,
+    };
+  });
 }
 
 // ─── GET (detalle por id) ─────────────────────────────────────────────────────
@@ -73,16 +146,10 @@ export async function getFormulaByIdAction(
 }
 
 // ─── CREATE ───────────────────────────────────────────────────────────────────
-// CAMBIO CLAVE: el DTO ahora usa insumoId / subFormulaId en lugar de
-// "nombreInsumo" + flag esFormula. Más explícito y type-safe.
-//
-// Antes:  { nombreInsumo: string; esFormula?: boolean }
-// Ahora:  { insumoId?: string; subFormulaId?: string }   ← CreateFormulaDetalleDTO
 
 export async function createFormulaAction(
   data: CreateFormulaDTO
 ): Promise<ActionResult<Formula>> {
-  // Validación: cada item debe tener exactamente uno de los dos IDs
   const itemsInvalidos = data.items.filter(
     (item) => !item.insumoId && !item.subFormulaId
   );
@@ -99,9 +166,9 @@ export async function createFormulaAction(
         name: data.name,
         items: {
           create: data.items.map((item) => ({
-            cantidad:      item.cantidad,
-            insumoId:      item.insumoId     ?? null,
-            subFormulaId:  item.subFormulaId ?? null,
+            cantidad:     new Prisma.Decimal(item.cantidad), // ← string → Decimal
+            insumoId:     item.insumoId     ?? null,
+            subFormulaId: item.subFormulaId ?? null,
           })),
         },
       },
@@ -128,7 +195,6 @@ export async function deleteFormulaAction(
   id: string
 ): Promise<ActionResult<null>> {
   try {
-    // onDelete: Cascade en FormulaDetalle elimina los items automáticamente
     await prisma.formula.delete({ where: { id } });
     revalidatePath("/formulas");
     return { success: true, data: null };

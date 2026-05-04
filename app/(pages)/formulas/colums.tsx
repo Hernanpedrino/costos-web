@@ -1,64 +1,55 @@
 "use client"
 
-import { ColumnDef } from "@tanstack/react-table"
+import { FormulaListItem } from "@/actions/Formulas";
+import { ColumnDef } from "@tanstack/react-table";
 
-export type ItemFila = {
-  id: string;
-  cantidad: string;
-  nombreIngrediente: string;
-  precioInsumo: number | null;
-}
+
+// El tipo de cada fila es el tipo de los items de FormulaListItem.
+// Al derivarlo directamente de la action, si FormulaListItem cambia
+// este archivo se actualiza solo — sin duplicar la definición.
+export type ItemFila = FormulaListItem["items"][number];
+
+const formatearPrecio = (amount: number) =>
+  new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+  }).format(amount);
 
 export const columns: ColumnDef<ItemFila>[] = [
   {
     accessorKey: "nombreIngrediente",
-    header: "Insumo",
-    footer: 'Costo del producto'
+    header: "Ingrediente",
   },
   {
     accessorKey: "cantidad",
     header: "Cantidad",
-  },
-  {
-    accessorKey: "precioInsumo",
-    header: "Precio Unitario",
     cell: ({ row }) => {
-      const amount = parseFloat(row.getValue("precioInsumo"))
-      return new Intl.NumberFormat("es-AR", {
-        style: "currency",
-        currency: "ARS",
-      }).format(amount)
+      // Decimal serializado a number — mostramos hasta 4 decimales
+      // pero eliminamos los ceros innecesarios (1.5000 → 1.5)
+      const valor = row.getValue<number>("cantidad");
+      return parseFloat(valor.toFixed(4));
     },
   },
   {
-    accessorKey: "total",
-    header: "Total",
+    accessorKey: "precioIngrediente",
+    header: () => <div className="text-right">Precio unitario</div>,
+    cell: ({ row }) => (
+      <div className="text-right font-medium">
+        {formatearPrecio(row.getValue<number>("precioIngrediente"))}
+      </div>
+    ),
+  },
+  {
+    id: "subtotal",
+    header: () => <div className="text-right">Subtotal</div>,
     cell: ({ row }) => {
-      const quantity = Number(row.original.cantidad)
-      const price = Number(row.original.precioInsumo)
-      const total = quantity * price
-      return new Intl.NumberFormat("es-AR", {
-        style: "currency",
-        currency: "ARS",
-      }).format(total)
-    },
-    footer: ({ table }) => {
-      const rows = table.getFilteredRowModel().rows
-      const { sumaTotales, sumaCantidades } = rows.reduce(
-        (acc, row) => {
-          const totalFila = Number(row.original.cantidad) * Number(row.original.precioInsumo)
-          return {
-            sumaTotales: acc.sumaTotales + totalFila,
-            sumaCantidades: acc.sumaCantidades + Number(row.original.cantidad),
-          }
-        },
-        { sumaTotales: 0, sumaCantidades: 0 }
-      )
-      const resultadoFinal = sumaCantidades > 0 ? sumaTotales / sumaCantidades : 0
-      return new Intl.NumberFormat("es-AR", {
-        style: "currency",
-        currency: "ARS",
-      }).format(resultadoFinal)
+      const precio = row.getValue<number>("precioIngrediente");
+      const cantidad = row.getValue<number>("cantidad");
+      return (
+        <div className="text-right font-medium">
+          {formatearPrecio(precio * cantidad)}
+        </div>
+      );
     },
   },
-]
+];

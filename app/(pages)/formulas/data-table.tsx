@@ -6,7 +6,6 @@ import {
   getCoreRowModel,
   useReactTable,
 } from "@tanstack/react-table"
-
 import {
   Table,
   TableBody,
@@ -14,19 +13,26 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-  TableFooter
 } from "@/components/ui/table"
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
   data: TData[]
-  title: String
+  title: string
+  precioTotal: number
 }
+
+const formatearPrecio = (amount: number) =>
+  new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+  }).format(amount);
 
 export function DataTable<TData, TValue>({
   columns,
   data,
-  title
+  title,
+  precioTotal,
 }: DataTableProps<TData, TValue>) {
   const table = useReactTable({
     data,
@@ -35,31 +41,34 @@ export function DataTable<TData, TValue>({
   })
 
   return (
-    <div className="overflow-hidden rounded-md border shadow-2xl">
-      <div className=" text-white bg-green-800 p-2 border-b">
-        <h2 className="text-xl font-bold tracking-tight">{title.toUpperCase()}</h2>
+    <div className="overflow-hidden rounded-md border shadow-xl">
+
+      <div className="px-4 py-3 bg-green-800 text-white">
+        <h2 className="text-base font-medium uppercase tracking-wide">
+          {title}
+        </h2>
       </div>
+
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
             <TableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => {
-                return (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
+              {headerGroup.headers.map((header) => (
+                <TableHead key={header.id}>
+                  {header.isPlaceholder
+                    ? null
+                    : flexRender(
                         header.column.columnDef.header,
                         header.getContext()
                       )}
-                  </TableHead>
-                )
-              })}
+                </TableHead>
+              ))}
             </TableRow>
           ))}
         </TableHeader>
+
         <TableBody>
-          {table.getRowModel().rows?.length ? (
+          {table.getRowModel().rows.length ? (
             table.getRowModel().rows.map((row) => (
               <TableRow
                 key={row.id}
@@ -75,27 +84,18 @@ export function DataTable<TData, TValue>({
           ) : (
             <TableRow>
               <TableCell colSpan={columns.length} className="h-24 text-center">
-                No results.
+                Sin ingredientes.
               </TableCell>
             </TableRow>
           )}
+          <TableRow className="border-t-2 border-green-800 bg-muted/40">
+            <TableCell className="font-medium">Precio total</TableCell>
+            <TableCell colSpan={columns.length - 2} />
+            <TableCell className="text-right font-semibold">
+              {formatearPrecio(precioTotal)}
+            </TableCell>
+          </TableRow>
         </TableBody>
-        <TableFooter>
-          {table.getFooterGroups().map((footerGroup) => (
-            <TableRow key={footerGroup.id}>
-              {footerGroup.headers.map((header) => (
-                <TableCell key={header.id} className="font-bold">
-                  {header.isPlaceholder
-                    ? null
-                    : flexRender(
-                      header.column.columnDef.footer,
-                      header.getContext()
-                    )}
-                </TableCell>
-              ))}
-            </TableRow>
-          ))}
-        </TableFooter>
       </Table>
     </div>
   )

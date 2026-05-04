@@ -31,6 +31,12 @@
       ],
       "@/insumos": [
         "./actions/insumos"
+      ],
+      "@/formulas/*": [
+        "./actions/formulas/*"
+      ],
+      "@/formulas": [
+        "./actions/formulas"
       ]
     }
   },

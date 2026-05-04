@@ -1,39 +1,44 @@
-import { columns, ItemFila } from "./colums";
+
+import { getFormulasAction } from "@/actions/Formulas";
 import { DataTable } from "./data-table";
-import dataMock from "../../../MOCK_DATA.json";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { getFormulasAction } from "@/actions/Formulas";
+import { columns } from "./colums";
 
-// async function getData(): Promise<ItemFila[]> {
-//   const response = getFormulasAction();
-//   return response;
-// }
 
-export default async function () {
-
+export default async function FormulasPage() {
   const formulas = await getFormulasAction();
 
   return (
     <div className="flex flex-col items-center">
-      <Link href={"/formulas/nueva"}>
+      <Link href="/formulas/nueva">
         <Button
           type="button"
-          className=" text-white bg-green-800 border-0 py-2 px-6 focus:outline-none hover:bg-green-600 rounded text-sm mt-10"
-          form="form-insumos"
-          size={"lg"}
+          className="text-white bg-green-800 border-0 py-2 px-6 focus:outline-none hover:bg-green-600 rounded text-sm mt-10"
+          size="lg"
         >
-          Nueva Formula
+          Nueva fórmula
         </Button>
       </Link>
-      {
-        formulas.map((tabla, index) => (
-          <div className="p-10 w-3/4" key={index}>
-            <DataTable columns={columns} data={tabla.items} title={tabla.name} />
-          </div>
-        ))
-      }
+
+      {formulas.length === 0 && (
+        <p className="mt-16 text-muted-foreground text-sm">
+          No hay fórmulas cargadas todavía.
+        </p>
+      )}
+
+      {formulas.map((formula) => (
+        <div className="p-10 w-3/4" key={formula.id}>
+          <DataTable
+            columns={columns}
+            data={formula.items}
+            title={formula.name}
+            precioTotal={formula.precioTotal}
+          />
+        </div>
+      ))}
     </div>
-  )
+  );
 }
-//TODO: CREAR UN FAB PARA IR AL INICIO DE LA PAGINA
+
+// TODO: FAB para volver al inicio de la página
