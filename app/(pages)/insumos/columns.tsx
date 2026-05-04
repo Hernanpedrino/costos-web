@@ -1,61 +1,54 @@
 "use client"
 
 import { ColumnDef } from "@tanstack/react-table";
-export type Insumos = {
-  name: string;
-  id: string;
-  suplier: string;
-  price: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
+import type { Insumo } from "@/types";
 
-export const columns: ColumnDef<Insumos>[] = [
+// Insumo viene de @/types — no se duplica el tipo acá.
+// createdAt y updatedAt son ISODateString (string), no Date.
+// El renderer ya los trataba como string — ahora el tipo lo refleja correctamente.
+
+const formatearFecha = (isoString: string) =>
+  new Intl.DateTimeFormat("es-ES", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(new Date(isoString));
+
+const formatearPrecio = (amount: number) =>
+  new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+  }).format(amount);
+
+export const columns: ColumnDef<Insumo>[] = [
   {
     accessorKey: "name",
-    header: "Producto/Insumo",
+    header: "Producto / Insumo",
   },
   {
-    accessorKey: "createdAt",
-    header: "Fecha de carga",
-    cell: ({ row }) => {
-      const date: string = row.getValue("createdAt")
-      const dateObj = new Date(date);
-      const formateador = new Intl.DateTimeFormat('es-ES', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-      });
-      const fechaFormateada = formateador.format(dateObj);
-      return fechaFormateada;
-    }
-  },
-  {
-    accessorKey: "updatedAt",
-    header: "Fecha de ultima modificacion",
-    cell: ({ row }) => {
-      const date: string = row.getValue("createdAt")
-      const dateObj = new Date(date);
-      const formateador = new Intl.DateTimeFormat('es-ES', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-      });
-      const fechaFormateada = formateador.format(dateObj);
-      return fechaFormateada;
-    }
+    accessorKey: "suplier",
+    header: "Proveedor",
   },
   {
     accessorKey: "price",
     header: () => <div className="text-right">Precio</div>,
     cell: ({ row }) => {
-      const amount = parseFloat(row.getValue("price"))
-      const formatted = new Intl.NumberFormat("es-AR", {
-        style: "currency",
-        currency: "ARS",
-      }).format(amount)
-
-      return <div className="text-right font-medium">{formatted}</div>
+      // price es number — sin parseFloat ni casteos
+      const formatted = formatearPrecio(row.getValue<number>("price"));
+      return <div className="text-right font-medium">{formatted}</div>;
     },
   },
-]
+  {
+    accessorKey: "createdAt",
+    header: "Fecha de carga",
+    cell: ({ row }) => formatearFecha(row.getValue<string>("createdAt")),
+  },
+  {
+    accessorKey: "updatedAt",
+    header: "Última modificación",
+    cell: ({ row }) => {
+      // ← Bug original: leía "createdAt" en lugar de "updatedAt"
+      return formatearFecha(row.getValue<string>("updatedAt"));
+    },
+  },
+];

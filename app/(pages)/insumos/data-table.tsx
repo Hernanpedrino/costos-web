@@ -7,7 +7,7 @@ import {
   getPaginationRowModel,
   getFilteredRowModel,
   useReactTable,
-} from "@tanstack/react-table"
+} from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -17,21 +17,21 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table"
+} from "@/components/ui/table";
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 
 interface DataTableProps<TData, TValue> {
-  columns: ColumnDef<TData, TValue>[]
-  data: TData[]
+  columns: ColumnDef<TData, TValue>[];
+  data: TData[];
 }
-
 
 export function DataTable<TData, TValue>({
   columns,
   data,
 }: DataTableProps<TData, TValue>) {
   const [filtering, setFiltering] = useState("");
+
   const table = useReactTable({
     data,
     columns,
@@ -39,39 +39,42 @@ export function DataTable<TData, TValue>({
     getPaginationRowModel: getPaginationRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     state: {
-      globalFilter: filtering
+      globalFilter: filtering,
     },
     onGlobalFilterChange: setFiltering,
-  })
+  });
+
   return (
     <div className="overflow-hidden rounded-md border shadow-xl">
-      <Input 
-      type="text"
-      placeholder="Buscar Insumo" 
-      className="w-1/4 m-2 border-green-800"
-      onChange={e => setFiltering(e.target.value)}
+      <Input
+        type="text"
+        placeholder="Buscar insumo"
+        className="w-1/4 m-2 border-green-800"
+        // value vinculado al estado — input controlado correctamente
+        value={filtering}
+        onChange={(e) => setFiltering(e.target.value)}
       />
+
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
             <TableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => {
-                return (
-                  <TableHead key={header.id}>
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(
+              {headerGroup.headers.map((header) => (
+                <TableHead key={header.id}>
+                  {header.isPlaceholder
+                    ? null
+                    : flexRender(
                         header.column.columnDef.header,
                         header.getContext()
                       )}
-                  </TableHead>
-                )
-              })}
+                </TableHead>
+              ))}
             </TableRow>
           ))}
         </TableHeader>
+
         <TableBody>
-          {table.getRowModel().rows?.length ? (
+          {table.getRowModel().rows.length ? (
             table.getRowModel().rows.map((row) => (
               <TableRow
                 key={row.id}
@@ -87,20 +90,49 @@ export function DataTable<TData, TValue>({
           ) : (
             <TableRow>
               <TableCell colSpan={columns.length} className="h-24 text-center">
-                No results.
+                Sin resultados.
               </TableCell>
             </TableRow>
           )}
         </TableBody>
       </Table>
-      <Separator orientation="horizontal"/>
-      <div className="mt-1 p-5">
-        <Button className="mr-2 bg-green-800 text-white" onClick={() => { table.setPageIndex(0) }}>Primera Pagina</Button>
-        <Button className="mr-2 bg-green-800 text-white" onClick={() => { table.previousPage() }} disabled={!table.getCanPreviousPage()}>Anterior</Button>
-        <Button className="mr-2 bg-green-800 text-white" onClick={() => { table.nextPage() }} disabled={!table.getCanNextPage()}>Siguiente</Button>
-        <Button className="mr-2 bg-green-800 text-white" onClick={() => { table.setPageIndex(table.getPageCount() - 1) }}>Ultima Pagina</Button>
-        <span className="ml-2">Pagina {`${table.getState().pagination.pageIndex + 1} - ${table.getPageCount()}`}</span>
+
+      <Separator orientation="horizontal" />
+
+      <div className="mt-1 p-5 flex items-center gap-2">
+        <Button
+          className="bg-green-800 text-white"
+          onClick={() => table.setPageIndex(0)}
+          disabled={!table.getCanPreviousPage()}
+        >
+          Primera página
+        </Button>
+        <Button
+          className="bg-green-800 text-white"
+          onClick={() => table.previousPage()}
+          disabled={!table.getCanPreviousPage()}
+        >
+          Anterior
+        </Button>
+        <Button
+          className="bg-green-800 text-white"
+          onClick={() => table.nextPage()}
+          disabled={!table.getCanNextPage()}
+        >
+          Siguiente
+        </Button>
+        <Button
+          className="bg-green-800 text-white"
+          onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+          disabled={!table.getCanNextPage()}
+        >
+          Última página
+        </Button>
+        <span className="ml-2 text-sm text-muted-foreground">
+          Página {table.getState().pagination.pageIndex + 1} de{" "}
+          {table.getPageCount()}
+        </span>
       </div>
     </div>
-  )
+  );
 }

@@ -18,7 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import * as z from "zod";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { createFormulaAction } from "@/actions/formulas";
+import { createFormulaAction } from "@/actions/Formulas";
 
 type FormValues = z.infer<typeof formSchema>
 type DataInsumos = {

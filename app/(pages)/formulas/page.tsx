@@ -3,7 +3,7 @@ import { DataTable } from "./data-table";
 import dataMock from "../../../MOCK_DATA.json";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { getFormulasAction } from "@/actions/formulas";
+import { getFormulasAction } from "@/actions/Formulas";
 
 // async function getData(): Promise<ItemFila[]> {
 //   const response = getFormulasAction();

@@ -1,6 +1,10 @@
 "use client";
+
+import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, Resolver, useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
+import * as z from "zod";
+
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,37 +20,60 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import * as z from "zod";
-import { createInsumoAction } from "@/actions/insumos";
+import { createInsumoAction } from "@/actions/Insumos";
 
 const formSchema = z.object({
   name: z
     .string()
     .min(2, "El nombre debe tener al menos 2 caracteres")
-    .max(32, "El nombre no debe tener mas de 32 caracteres"),
+    .max(32, "El nombre no debe superar los 32 caracteres"),
   suplier: z
     .string()
-    .min(3, "El nombre debe tener al menos 3 caracteres")
-    .max(32, "El nombre no debe tener mas de 32 caracteres"),
+    .min(3, "El proveedor debe tener al menos 3 caracteres")
+    .max(32, "El proveedor no debe superar los 32 caracteres"),
   price: z
-    .coerce
-    .number()
+    .number({ message: "Ingresá un número válido" })
     .positive("El precio debe ser mayor a 0"),
 });
+
 type InsumoFormValues = z.infer<typeof formSchema>;
 
+// ─── Componente ───────────────────────────────────────────────────────────────
+
 export const Form = () => {
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
   const form = useForm<InsumoFormValues>({
-    resolver: zodResolver(formSchema) as Resolver<InsumoFormValues>,
+    resolver: zodResolver(formSchema),
     defaultValues: {
       name: "",
       suplier: "",
-      price: 0,
+      price: undefined,
     },
   });
-  async function onSubmit(data: z.infer<typeof formSchema>) {
-    const result = await createInsumoAction(data);
-    form.reset();
+
+  async function onSubmit(data: InsumoFormValues) {
+    setFeedback(null);
+
+    // Zod produce price: number → lo convertimos a string para CreateInsumoDTO
+    const result = await createInsumoAction({
+      name:    data.name,
+      suplier: data.suplier,
+      price:   data.price.toString(),
+    });
+
+    if (result.success) {
+      setFeedback({
+        type: "success",
+        message: `"${result.data.name}" agregado correctamente.`,
+      });
+      form.reset();
+    } else {
+      setFeedback({ type: "error", message: result.error });
+    }
   }
 
   return (
@@ -55,22 +82,24 @@ export const Form = () => {
         <CardHeader>
           <CardTitle>Carga de nuevo insumo</CardTitle>
         </CardHeader>
+
         <CardContent>
           <form id="form-insumos" onSubmit={form.handleSubmit(onSubmit)}>
             <FieldGroup>
+
               <Controller
                 name="name"
                 control={form.control}
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
-                    <FieldLabel htmlFor="form-rhf-demo-title">
+                    <FieldLabel htmlFor="insumo-name">
                       Nombre del insumo
                     </FieldLabel>
                     <Input
                       {...field}
-                      id="form-rhf-demo-title"
+                      id="insumo-name"
                       aria-invalid={fieldState.invalid}
-                      placeholder="Aji molido"
+                      placeholder="Ají molido"
                       autoComplete="off"
                     />
                     {fieldState.invalid && (
@@ -79,19 +108,20 @@ export const Form = () => {
                   </Field>
                 )}
               />
+
               <Controller
                 name="suplier"
                 control={form.control}
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
-                    <FieldLabel htmlFor="form-rhf-demo-title">
+                    <FieldLabel htmlFor="insumo-suplier">
                       Proveedor
                     </FieldLabel>
                     <Input
                       {...field}
-                      id="form-rhf-demo-title"
+                      id="insumo-suplier"
                       aria-invalid={fieldState.invalid}
-                      placeholder="Alimentos del plata"
+                      placeholder="Alimentos del Plata"
                       autoComplete="off"
                     />
                     {fieldState.invalid && (
@@ -100,21 +130,27 @@ export const Form = () => {
                   </Field>
                 )}
               />
+
               <Controller
                 name="price"
                 control={form.control}
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
-                    <FieldLabel htmlFor="form-rhf-demo-description">
-                      Precio
-                    </FieldLabel>
+                    <FieldLabel htmlFor="insumo-price">Precio</FieldLabel>
+
                     <Input
-                      {...field}
-                      id="form-rhf-demo-title"
+                      name={field.name}
+                      ref={field.ref}
+                      onBlur={field.onBlur}
+                      value={field.value ?? ""}
+                      onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                      id="insumo-price"
                       aria-invalid={fieldState.invalid}
                       placeholder="4500"
                       autoComplete="off"
                       type="number"
+                      step="0.01"
+                      min="0"
                     />
                     {fieldState.invalid && (
                       <FieldError errors={[fieldState.error]} />
@@ -122,17 +158,34 @@ export const Form = () => {
                   </Field>
                 )}
               />
+
             </FieldGroup>
           </form>
+
+          {feedback && (
+            <p
+              className={`mt-4 text-sm px-3 py-2 rounded-md ${
+                feedback.type === "success"
+                  ? "bg-green-50 text-green-800 border border-green-200"
+                  : "bg-red-50 text-red-700 border border-red-200"
+              }`}
+            >
+              {feedback.message}
+            </p>
+          )}
         </CardContent>
+
         <CardFooter>
           <Field orientation="horizontal">
             <Button
               type="submit"
-              className="inline-flex text-white bg-green-800 border-0 py-2 px-6 focus:outline-none hover:bg-green-600 rounded text-sm mt-10"
               form="form-insumos"
+              disabled={form.formState.isSubmitting}
+              className="inline-flex text-white bg-green-800 border-0 py-2 px-6
+                         focus:outline-none hover:bg-green-600 rounded text-sm mt-10
+                         disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Agregar Insumo
+              {form.formState.isSubmitting ? "Guardando..." : "Agregar insumo"}
             </Button>
           </Field>
         </CardFooter>
@@ -140,3 +193,4 @@ export const Form = () => {
     </div>
   );
 };
+//TODO: Corregir los decimales en el formulario. Consultar a Claude.

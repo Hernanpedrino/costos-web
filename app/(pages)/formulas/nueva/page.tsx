@@ -1,5 +1,5 @@
 
-import { getInsumosAction } from "@/actions/insumos";
+import { getInsumosAction } from "@/actions/Insumos";
 import { NewFormulaForm } from "./newFormulaForm";
 
 type DataInsumos = {
