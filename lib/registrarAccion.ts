@@ -2,7 +2,7 @@
 // Helper para registrar acciones de auditoría desde los Server Actions
 
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/auth/auth";
+import { auth } from "@/auth";
 import { Prisma, type TipoAccion, type EntidadAccion } from "@/generated/prisma";
 
 interface RegistrarAccionParams {
