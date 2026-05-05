@@ -20,7 +20,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { createInsumoAction } from "@/actions/Insumos";
+import { createInsumoAction } from "@/actions/insumos";
 
 const formSchema = z.object({
   name: z

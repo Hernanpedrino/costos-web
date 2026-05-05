@@ -32,7 +32,7 @@ import {
 
 
 import type { Insumo, Formula } from "@/types";
-import { createFormulaAction } from "@/actions/Formulas";
+import { createFormulaAction } from "@/actions/formulas";
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 // ingredienteId lleva un prefijo que identifica el tipo:

@@ -1,24 +1,44 @@
 'use client';
 
 import Link from "next/link";
+import { LogOut } from "lucide-react";
+import { logoutAction } from "@/actions/auth";
 
 export const Navbar = () => {
   return (
     <header className="text-gray-600 body-font">
       <div className="container mx-auto flex flex-wrap p-5 flex-col md:flex-row items-center">
-        <Link href={'/home'} className="flex title-font font-medium items-center text-gray-900 mb-4 md:mb-0">
+
+        {/* Logo */}
+        <Link href="/" className="flex title-font font-medium items-center text-gray-900 mb-4 md:mb-0">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" className="w-10 h-10 text-white p-2 bg-indigo-500 rounded-full" viewBox="0 0 24 24">
             <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path>
           </svg>
           <span className="ml-3 text-xl">EL CHILO SRL</span>
         </Link>
+
+        {/* Links de navegación */}
         <nav className="md:mr-auto md:ml-4 md:py-1 md:pl-4 md:border-l md:border-gray-400 flex flex-wrap items-center text-base justify-center">
-          <Link href={'/insumos'} className="mr-5 hover:text-gray-900">Insumos</Link>
-          <Link href={'/formulas'} className="mr-5 hover:text-gray-900">Formulas</Link>
-          <Link href={'/home'} className="mr-5 hover:text-gray-900">Estadisticas</Link>
-          <Link href={'/home'} className="mr-5 hover:text-gray-900">Informes</Link>
+          <Link href="/insumos"  className="mr-5 hover:text-gray-900">Insumos</Link>
+          <Link href="/formulas" className="mr-5 hover:text-gray-900">Fórmulas</Link>
+          <Link href="/home"     className="mr-5 hover:text-gray-900">Estadísticas</Link>
+          <Link href="/home"     className="mr-5 hover:text-gray-900">Informes</Link>
         </nav>
+
+        {/* Botón de cerrar sesión */}
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            title="Cerrar sesión"
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-red-600 transition-colors"
+          >
+            <LogOut className="w-5 h-5" />
+            <span className="hidden md:inline">Salir</span>
+          </button>
+        </form>
+
       </div>
     </header>
-  )
-}
+  );
+};
+

@@ -3,7 +3,6 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { signIn } from "next-auth/react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
 import * as z from "zod"
@@ -16,17 +15,14 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-
-// ─── Schema ───────────────────────────────────────────────────────────────────
+import { loginAction } from "@/actions/auth"
 
 const formSchema = z.object({
-  email:    z.email("Ingresá un email válido"),
+  email:    z.string().email("Ingresá un email válido"),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
 })
 
 type LoginFormValues = z.infer<typeof formSchema>
-
-// ─── Componente ───────────────────────────────────────────────────────────────
 
 export const Login = () => {
   const router = useRouter()
@@ -40,36 +36,28 @@ export const Login = () => {
   const onSubmit = async (data: LoginFormValues) => {
     setErrorServidor(null)
 
-    const result = await signIn("credentials", {
-      email:    data.email,
-      password: data.password,
-      redirect: false,       // manejamos la redirección manualmente
-    })
+    const formData = new FormData()
+    formData.set("email",    data.email)
+    formData.set("password", data.password)
 
-    if (result?.error) {
-      // NextAuth devuelve error genérico — nunca revelar si es email o password
-      setErrorServidor("Email o contraseña incorrectos.")
+    const result = await loginAction(formData)
+
+    if (!result.success) {
+      setErrorServidor(result.error ?? "Error inesperado.")
       return
     }
 
+    // Login exitoso — la cookie ya está seteada, navegamos al home
     router.push("/")
-    router.refresh() // sincroniza la sesión en los Server Components
+    router.refresh()
   }
 
   return (
     <div className="w-full h-screen flex items-center justify-center">
       <div className="w-full md:w-1/3 border rounded-lg shadow-xl">
+        <h2 className="text-2xl text-center font-bold my-8">Iniciar sesión</h2>
 
-        {/* Logo */}
-        <div className="flex font-bold justify-center my-6">
-        </div>
-
-        <h2 className="text-2xl text-center font-bold mb-8">Iniciar sesión</h2>
-
-        <form
-          onSubmit={form.handleSubmit(onSubmit)}
-          className="px-12 pb-10"
-        >
+        <form onSubmit={form.handleSubmit(onSubmit)} className="px-12 pb-10">
           <FieldGroup>
             <Controller
               name="email"
@@ -114,7 +102,6 @@ export const Login = () => {
             />
           </FieldGroup>
 
-          {/* Error de credenciales (viene del servidor) */}
           {errorServidor && (
             <p className="mt-4 text-sm px-3 py-2 rounded-md bg-red-50 text-red-700 border border-red-200">
               {errorServidor}

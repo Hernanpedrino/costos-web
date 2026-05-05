@@ -1,6 +1,6 @@
 
-import { getFormulasAction } from "@/actions/Formulas";
-import { getInsumosAction } from "@/actions/Insumos";
+import { getFormulasAction } from "@/actions/formulas";
+import { getInsumosAction } from "@/actions/insumos";
 import { NewFormulaForm } from "./newFormulaForm";
 
 export default async function NuevaFormulaPage() {

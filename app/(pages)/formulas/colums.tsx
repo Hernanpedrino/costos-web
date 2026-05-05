@@ -1,6 +1,6 @@
 "use client"
 
-import { FormulaListItem } from "@/actions/Formulas";
+import { FormulaListItem } from "@/actions/formulas";
 import { ColumnDef } from "@tanstack/react-table";
 
 

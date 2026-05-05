@@ -4,11 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@/generated/prisma";
 import { serializarInsumo } from "@/types";
+import { registrarAccion } from "@/lib/registrarAccion";
+import { auth } from "@/auth";
 import type { Insumo, CreateInsumoDTO, UpdateInsumoDTO } from "@/types";
-
-// ─── Tipo de retorno de las actions ───────────────────────────────────────────
-// Discriminated union: success = true/false para que el cliente pueda hacer
-// narrowing sin casteos: if (result.success) { result.data ... }
 
 type ActionResult<T> =
   | { success: true; data: T }
@@ -17,18 +15,49 @@ type ActionResult<T> =
 // ─── GET ──────────────────────────────────────────────────────────────────────
 
 export async function getInsumosAction(): Promise<Insumo[]> {
-  const raws = await prisma.insumo.findMany({
-    orderBy: { createdAt: "desc" },
-  });
-  // serializarInsumo convierte Decimal → number y Date → ISODateString
+  const raws = await prisma.insumo.findMany({ orderBy: { createdAt: "desc" } });
   return raws.map(serializarInsumo);
 }
 
-export async function getInsumoByIdAction(
-  id: string
-): Promise<Insumo | null> {
+export async function getInsumoByIdAction(id: string): Promise<Insumo | null> {
   const raw = await prisma.insumo.findUnique({ where: { id } });
   return raw ? serializarInsumo(raw) : null;
+}
+
+// ─── GET HISTORIAL DE PRECIOS ─────────────────────────────────────────────────
+
+export interface HistorialPrecio {
+  id:            string;
+  precioAntes:   number;
+  precioDespues: number;
+  variacion:     number;   // precioDespues - precioAntes
+  variacionPct:  number;   // % de cambio respecto al precio anterior
+  usuario:       string;   // nombre del usuario que hizo el cambio
+  createdAt:     string;   // ISODateString
+}
+
+export async function getHistorialPreciosAction(
+  insumoId: string
+): Promise<HistorialPrecio[]> {
+  const registros = await prisma.historialPrecioInsumo.findMany({
+    where:   { insumoId },
+    include: { usuario: { select: { nombre: true } } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return registros.map((r) => {
+    const antes   = r.precioAntes.toNumber();
+    const despues = r.precioDespues.toNumber();
+    return {
+      id:            r.id,
+      precioAntes:   antes,
+      precioDespues: despues,
+      variacion:     despues - antes,
+      variacionPct:  antes > 0 ? ((despues - antes) / antes) * 100 : 0,
+      usuario:       r.usuario.nombre,
+      createdAt:     r.createdAt.toISOString(),
+    };
+  });
 }
 
 // ─── CREATE ───────────────────────────────────────────────────────────────────
@@ -41,21 +70,22 @@ export async function createInsumoAction(
       data: {
         name:    data.name,
         suplier: data.suplier,
-        // data.price viene como string desde el form — Decimal lo parsea
         price:   new Prisma.Decimal(data.price),
       },
     });
 
+    await registrarAccion({
+      accion:    "CREAR",
+      entidad:   "Insumo",
+      entidadId: raw.id,
+      detalle: { name: raw.name, suplier: raw.suplier, price: raw.price.toString() },
+    });
+
     revalidatePath("/insumos");
-    console.log("Insumo creado", data);
     return { success: true, data: serializarInsumo(raw) };
 
   } catch (error) {
-    // P2002 = unique constraint violation (name @unique)
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return { success: false, error: "Ya existe un insumo con ese nombre." };
     }
     console.error("[createInsumoAction]", error);
@@ -71,12 +101,41 @@ export async function updateInsumoAction(
   const { id, price, ...rest } = data;
 
   try {
+    const anterior = await prisma.insumo.findUnique({ where: { id } });
+    const session  = await auth();
+
     const raw = await prisma.insumo.update({
       where: { id },
       data: {
         ...rest,
-        // Solo actualizamos el precio si viene en el DTO
         ...(price !== undefined && { price: new Prisma.Decimal(price) }),
+      },
+    });
+
+    // Registrar historial SOLO si el precio cambió
+    const precioAntes   = anterior?.price.toNumber() ?? 0;
+    const precioDespues = raw.price.toNumber();
+    const precioCambio  = precioAntes !== precioDespues;
+
+    if (precioCambio && session?.user?.id) {
+      await prisma.historialPrecioInsumo.create({
+        data: {
+          insumoId:      id,
+          precioAntes:   new Prisma.Decimal(precioAntes),
+          precioDespues: raw.price,
+          usuarioId:     session.user.id,
+        },
+      });
+    }
+
+    await registrarAccion({
+      accion:    "EDITAR",
+      entidad:   "Insumo",
+      entidadId: raw.id,
+      detalle: {
+        anterior: { name: anterior?.name, price: anterior?.price.toString() },
+        nuevo:    { name: raw.name, price: raw.price.toString() },
+        precioCambio,
       },
     });
 
@@ -84,10 +143,7 @@ export async function updateInsumoAction(
     return { success: true, data: serializarInsumo(raw) };
 
   } catch (error) {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === "P2002"
-    ) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return { success: false, error: "Ya existe un insumo con ese nombre." };
     }
     console.error("[updateInsumoAction]", error);
@@ -97,11 +153,18 @@ export async function updateInsumoAction(
 
 // ─── DELETE ───────────────────────────────────────────────────────────────────
 
-export async function deleteInsumoAction(
-  id: string
-): Promise<ActionResult<null>> {
+export async function deleteInsumoAction(id: string): Promise<ActionResult<null>> {
   try {
+    const anterior = await prisma.insumo.findUnique({ where: { id } });
     await prisma.insumo.delete({ where: { id } });
+
+    await registrarAccion({
+      accion:    "ELIMINAR",
+      entidad:   "Insumo",
+      entidadId: id,
+      detalle:   { name: anterior?.name, price: anterior?.price.toString() },
+    });
+
     revalidatePath("/insumos");
     return { success: true, data: null };
 

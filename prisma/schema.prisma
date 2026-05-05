@@ -17,14 +17,15 @@ enum Rol {
 model Usuario {
   id        String   @id @default(uuid())
   email     String   @unique
-  password  String   // hash bcrypt — nunca guardar texto plano
+  password  String
   nombre    String
   rol       Rol      @default(OPERADOR)
   activo    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  acciones  RegistroAccion[]
+  acciones         RegistroAccion[]
+  cambiosDePrecios HistorialPrecioInsumo[]
 
   @@index([email])
 }
@@ -53,11 +54,26 @@ model RegistroAccion {
   createdAt DateTime      @default(now())
 
   @@index([usuarioId])
-  @@index([entidad])
   @@index([createdAt])
 }
 
-// ─── Modelos existentes ───────────────────────────────────────────────────────
+// ─── Historial de precios ─────────────────────────────────────────────────────
+
+model HistorialPrecioInsumo {
+  id            String   @id @default(uuid())
+  insumoId      String
+  insumo        Insumo   @relation(fields: [insumoId], references: [id], onDelete: Cascade)
+  precioAntes   Decimal  @db.Decimal(10, 2)
+  precioDespues Decimal  @db.Decimal(10, 2)
+  usuarioId     String
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id])
+  createdAt     DateTime @default(now())
+
+  @@index([insumoId])
+  @@index([createdAt])
+}
+
+// ─── Insumos ──────────────────────────────────────────────────────────────────
 
 model Insumo {
   id        String   @id @default(uuid())
@@ -67,8 +83,11 @@ model Insumo {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  usadoEn   FormulaDetalle[]
+  usadoEn          FormulaDetalle[]
+  historialPrecios HistorialPrecioInsumo[]
 }
+
+// ─── Fórmulas ─────────────────────────────────────────────────────────────────
 
 model Formula {
   id        String   @id @default(uuid())
@@ -84,11 +103,11 @@ model FormulaDetalle {
   id       String  @id @default(uuid())
   cantidad Decimal @db.Decimal(10, 4)
 
-  formulaId String
-  formula   Formula @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+  formulaId    String
+  formula      Formula  @relation(fields: [formulaId], references: [id], onDelete: Cascade)
 
-  insumoId  String?
-  insumo    Insumo?  @relation(fields: [insumoId], references: [id])
+  insumoId     String?
+  insumo       Insumo?  @relation(fields: [insumoId], references: [id])
 
   subFormulaId String?
   subFormula   Formula? @relation("SubFormula", fields: [subFormulaId], references: [id])

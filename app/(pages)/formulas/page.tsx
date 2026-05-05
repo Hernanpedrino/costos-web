@@ -1,5 +1,5 @@
 
-import { getFormulasAction } from "@/actions/Formulas";
+import { getFormulasAction } from "@/actions/formulas";
 import { DataTable } from "./data-table";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";

@@ -1,5 +1,5 @@
-// proxy.ts — en la RAÍZ del proyecto (reemplaza middleware.ts)
-import { auth } from "@/auth"
+// proxy.ts — en la RAÍZ del proyecto
+import { auth } from "./auth"   // import relativo — evita ambigüedad con la carpeta auth/
 import { NextResponse } from "next/server"
 
 export default auth((req) => {

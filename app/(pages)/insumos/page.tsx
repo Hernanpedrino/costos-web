@@ -2,7 +2,7 @@ import { Separator } from "@/components/ui/separator";
 import { columns } from "./columns";
 import { DataTable } from "./data-table";
 import { Form } from "@/components/form/Form";
-import { getInsumosAction } from "@/actions/Insumos";
+import { getInsumosAction } from "@/actions/insumos";
 
 
 export default async function Insumos() {
