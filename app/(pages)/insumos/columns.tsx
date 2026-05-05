@@ -3,9 +3,6 @@
 import { ColumnDef } from "@tanstack/react-table";
 import type { Insumo } from "@/types";
 
-// Insumo viene de @/types — no se duplica el tipo acá.
-// createdAt y updatedAt son ISODateString (string), no Date.
-// El renderer ya los trataba como string — ahora el tipo lo refleja correctamente.
 
 const formatearFecha = (isoString: string) =>
   new Intl.DateTimeFormat("es-ES", {
@@ -33,7 +30,6 @@ export const columns: ColumnDef<Insumo>[] = [
     accessorKey: "price",
     header: () => <div className="text-right">Precio</div>,
     cell: ({ row }) => {
-      // price es number — sin parseFloat ni casteos
       const formatted = formatearPrecio(row.getValue<number>("price"));
       return <div className="text-right font-medium">{formatted}</div>;
     },
@@ -47,7 +43,6 @@ export const columns: ColumnDef<Insumo>[] = [
     accessorKey: "updatedAt",
     header: "Última modificación",
     cell: ({ row }) => {
-      // ← Bug original: leía "createdAt" en lugar de "updatedAt"
       return formatearFecha(row.getValue<string>("updatedAt"));
     },
   },
