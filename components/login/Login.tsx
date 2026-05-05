@@ -7,7 +7,6 @@ import { signIn } from "next-auth/react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
 import * as z from "zod"
-import Image from "next/image"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,7 +20,7 @@ import {
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
 const formSchema = z.object({
-  email:    z.string().email("Ingresá un email válido"),
+  email:    z.email("Ingresá un email válido"),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
 })
 
@@ -63,12 +62,6 @@ export const Login = () => {
 
         {/* Logo */}
         <div className="flex font-bold justify-center my-6">
-          <Image
-            src="/logo.png"       // reemplazá con tu logo real en /public
-            alt="Logo"
-            width={64}
-            height={64}
-          />
         </div>
 
         <h2 className="text-2xl text-center font-bold mb-8">Iniciar sesión</h2>
