@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { logoutAction } from "@/actions/auth";
-
+import { signOut } from "next-auth/react"
 export const Navbar = () => {
   return (
     <header className="text-gray-600 body-font">
@@ -31,6 +31,7 @@ export const Navbar = () => {
             type="submit"
             title="Cerrar sesión"
             className="flex items-center gap-2 text-sm text-gray-500 hover:text-red-600 transition-colors"
+            onClick={() => signOut({ callbackUrl: "/login" })}
           >
             <LogOut className="w-5 h-5" />
             <span className="hidden md:inline">Salir</span>

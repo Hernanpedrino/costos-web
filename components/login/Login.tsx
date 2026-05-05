@@ -3,6 +3,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import { signIn } from "next-auth/react"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Controller, useForm } from "react-hook-form"
 import * as z from "zod"
@@ -15,7 +16,6 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field"
-import { loginAction } from "@/actions/auth"
 
 const formSchema = z.object({
   email:    z.string().email("Ingresá un email válido"),
@@ -36,18 +36,18 @@ export const Login = () => {
   const onSubmit = async (data: LoginFormValues) => {
     setErrorServidor(null)
 
-    const formData = new FormData()
-    formData.set("email",    data.email)
-    formData.set("password", data.password)
+    // signIn de next-auth/react — sin referencias circulares
+    const result = await signIn("credentials", {
+      email:    data.email,
+      password: data.password,
+      redirect: false,
+    })
 
-    const result = await loginAction(formData)
-
-    if (!result.success) {
-      setErrorServidor(result.error ?? "Error inesperado.")
+    if (result?.error) {
+      setErrorServidor("Email o contraseña incorrectos.")
       return
     }
 
-    // Login exitoso — la cookie ya está seteada, navegamos al home
     router.push("/")
     router.refresh()
   }
@@ -73,9 +73,7 @@ export const Login = () => {
                     autoComplete="email"
                     aria-invalid={fieldState.invalid}
                   />
-                  {fieldState.invalid && (
-                    <FieldError errors={[fieldState.error]} />
-                  )}
+                  {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                 </Field>
               )}
             />
@@ -94,9 +92,7 @@ export const Login = () => {
                     autoComplete="current-password"
                     aria-invalid={fieldState.invalid}
                   />
-                  {fieldState.invalid && (
-                    <FieldError errors={[fieldState.error]} />
-                  )}
+                  {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                 </Field>
               )}
             />
