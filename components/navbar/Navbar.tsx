@@ -19,10 +19,10 @@ export const Navbar = () => {
 
         {/* Links de navegación */}
         <nav className="md:mr-auto md:ml-4 md:py-1 md:pl-4 md:border-l md:border-gray-400 flex flex-wrap items-center text-base justify-center">
-          <Link href="/insumos"  className="mr-5 hover:text-gray-900">Insumos</Link>
+          <Link href="/insumos" className="mr-5 hover:text-gray-900">Insumos</Link>
           <Link href="/formulas" className="mr-5 hover:text-gray-900">Fórmulas</Link>
-          <Link href="/home"     className="mr-5 hover:text-gray-900">Estadísticas</Link>
-          <Link href="/home"     className="mr-5 hover:text-gray-900">Informes</Link>
+          <Link href="/estadisticas" className="mr-5 hover:text-gray-900">Estadísticas</Link>
+          <Link href="/informes" className="mr-5 hover:text-gray-900">Informes</Link>
         </nav>
 
         {/* Botón de cerrar sesión */}
