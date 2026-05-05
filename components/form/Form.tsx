@@ -20,7 +20,14 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+
 import { createInsumoAction } from "@/actions/insumos";
+
+// ─── Schema ───────────────────────────────────────────────────────────────────
+// Zod v4: usar z.number() en lugar de z.coerce.number().
+// z.coerce tipea el input como `unknown` en v4, lo que rompe la inferencia
+// del Resolver de react-hook-form. La conversión string→number la maneja
+// el Input con e.target.valueAsNumber.
 
 const formSchema = z.object({
   name: z
@@ -33,7 +40,8 @@ const formSchema = z.object({
     .max(32, "El proveedor no debe superar los 32 caracteres"),
   price: z
     .number({ message: "Ingresá un número válido" })
-    .positive("El precio debe ser mayor a 0"),
+    .positive("El precio debe ser mayor a 0")
+    .refine((v) => Math.round(v * 100) / 100 === v, "Máximo 2 decimales"),
 });
 
 type InsumoFormValues = z.infer<typeof formSchema>;
@@ -137,12 +145,17 @@ export const Form = () => {
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
                     <FieldLabel htmlFor="insumo-price">Precio</FieldLabel>
-
+                    {/*
+                      No usamos {...field} directo: el input HTML devuelve string
+                      pero el schema espera number. Desestructuramos field y
+                      sobreescribimos onChange con valueAsNumber para que
+                      react-hook-form reciba siempre un number.
+                    */}
                     <Input
                       name={field.name}
                       ref={field.ref}
                       onBlur={field.onBlur}
-                      value={field.value ?? ""}
+                      value={Number.isNaN(field.value) || field.value === undefined ? "" : field.value}
                       onChange={(e) => field.onChange(e.target.valueAsNumber)}
                       id="insumo-price"
                       aria-invalid={fieldState.invalid}
@@ -193,4 +206,3 @@ export const Form = () => {
     </div>
   );
 };
-//TODO: Corregir los decimales en el formulario. Consultar a Claude.

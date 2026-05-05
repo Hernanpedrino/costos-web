@@ -24,11 +24,14 @@ import { Input } from "@/components/ui/input";
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
+  // Opcional: si se provee, las filas son clickeables
+  onRowClick?: (row: TData) => void;
 }
 
 export function DataTable<TData, TValue>({
   columns,
   data,
+  onRowClick,
 }: DataTableProps<TData, TValue>) {
   const [filtering, setFiltering] = useState("");
 
@@ -38,9 +41,7 @@ export function DataTable<TData, TValue>({
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    state: {
-      globalFilter: filtering,
-    },
+    state: { globalFilter: filtering },
     onGlobalFilterChange: setFiltering,
   });
 
@@ -50,7 +51,6 @@ export function DataTable<TData, TValue>({
         type="text"
         placeholder="Buscar insumo"
         className="w-1/4 m-2 border-green-800"
-        // value vinculado al estado — input controlado correctamente
         value={filtering}
         onChange={(e) => setFiltering(e.target.value)}
       />
@@ -63,10 +63,7 @@ export function DataTable<TData, TValue>({
                 <TableHead key={header.id}>
                   {header.isPlaceholder
                     ? null
-                    : flexRender(
-                        header.column.columnDef.header,
-                        header.getContext()
-                      )}
+                    : flexRender(header.column.columnDef.header, header.getContext())}
                 </TableHead>
               ))}
             </TableRow>
@@ -79,6 +76,8 @@ export function DataTable<TData, TValue>({
               <TableRow
                 key={row.id}
                 data-state={row.getIsSelected() && "selected"}
+                onClick={() => onRowClick?.(row.original)}
+                className={onRowClick ? "cursor-pointer hover:bg-muted/60 transition-colors" : ""}
               >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>

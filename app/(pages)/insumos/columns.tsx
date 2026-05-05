@@ -3,7 +3,6 @@
 import { ColumnDef } from "@tanstack/react-table";
 import type { Insumo } from "@/types";
 
-
 const formatearFecha = (isoString: string) =>
   new Intl.DateTimeFormat("es-ES", {
     day: "2-digit",
@@ -36,14 +35,20 @@ export const columns: ColumnDef<Insumo>[] = [
   },
   {
     accessorKey: "createdAt",
-    header: "Fecha de carga",
-    cell: ({ row }) => formatearFecha(row.getValue<string>("createdAt")),
+    header: () => <div className="text-right">Fecha de carga</div>,
+    cell: ({ row }) => (
+      <div className="text-right">
+        {formatearFecha(row.getValue<string>("createdAt"))}
+      </div>
+    ),
   },
   {
     accessorKey: "updatedAt",
-    header: "Última modificación",
-    cell: ({ row }) => {
-      return formatearFecha(row.getValue<string>("updatedAt"));
-    },
+    header: () => <div className="text-right">Última modificación</div>,
+    cell: ({ row }) => (
+      <div className="text-right">
+        {formatearFecha(row.getValue<string>("updatedAt"))}
+      </div>
+    ),
   },
 ];
