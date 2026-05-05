@@ -1,25 +1,25 @@
 // proxy.ts — en la RAÍZ del proyecto
-import { auth } from "./auth"   // import relativo — evita ambigüedad con la carpeta auth/
-import { NextResponse } from "next/server"
+import NextAuth from "next-auth"
+import { authConfig } from "./auth/config"  // import relativo desde la raíz
+
+const { auth } = NextAuth(authConfig)
 
 export default auth((req) => {
   const isLoggedIn  = !!req.auth
   const isLoginPage = req.nextUrl.pathname.startsWith("/login")
   const isApiAuth   = req.nextUrl.pathname.startsWith("/api/auth")
 
-  if (isApiAuth) return NextResponse.next()
+  if (isApiAuth) return
 
   if (!isLoggedIn && !isLoginPage) {
     const loginUrl = new URL("/login", req.nextUrl.origin)
     loginUrl.searchParams.set("callbackUrl", req.nextUrl.pathname)
-    return NextResponse.redirect(loginUrl)
+    return Response.redirect(loginUrl)
   }
 
   if (isLoggedIn && isLoginPage) {
-    return NextResponse.redirect(new URL("/", req.nextUrl.origin))
+    return Response.redirect(new URL("/", req.nextUrl.origin))
   }
-
-  return NextResponse.next()
 })
 
 export const config = {
