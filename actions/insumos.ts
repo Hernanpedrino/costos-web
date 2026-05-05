@@ -15,7 +15,7 @@ type ActionResult<T> =
 // ─── GET ──────────────────────────────────────────────────────────────────────
 
 export async function getInsumosAction(): Promise<Insumo[]> {
-  const raws = await prisma.insumo.findMany({ orderBy: { createdAt: "desc" } });
+  const raws = await prisma.insumo.findMany({ orderBy: { name: "asc" } });
   return raws.map(serializarInsumo);
 }
 

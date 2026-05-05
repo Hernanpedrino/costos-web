@@ -107,7 +107,7 @@ export async function getFormulasAction(): Promise<FormulaListItem[]> {
         },
       },
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: { name: "asc" },
   });
 
   return formulas.map((formula) => {

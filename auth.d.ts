@@ -11,7 +11,9 @@ declare module "next-auth" {
     }
   }
 
+  // Declarar role en User para que el callback session lo reconozca
   interface User {
+    id?:   string
     role?: string
   }
 }
