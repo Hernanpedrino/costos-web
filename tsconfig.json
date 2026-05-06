@@ -26,6 +26,9 @@
       "@/*": [
         "./*"
       ],
+      "@/auth": [
+        "./auth/index.ts"
+      ],
       "@/insumos/*": [
         "./actions/insumos/*"
       ],

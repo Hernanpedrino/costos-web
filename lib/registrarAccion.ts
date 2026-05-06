@@ -2,30 +2,28 @@
 // Helper para registrar acciones de auditoría desde los Server Actions
 
 import { prisma } from "@/lib/prisma";
-import { auth } from "@/auth";
 import { Prisma, type TipoAccion, type EntidadAccion } from "@/generated/prisma";
 
 interface RegistrarAccionParams {
-  accion:    TipoAccion;
-  entidad:   EntidadAccion;
+  usuarioId:  string;
+  accion:     TipoAccion;
+  entidad:    EntidadAccion;
   entidadId?: string;
-  detalle?:  Prisma.InputJsonValue;
+  detalle?:   Prisma.InputJsonValue;
 }
 
 export async function registrarAccion({
+  usuarioId,
   accion,
   entidad,
   entidadId,
   detalle,
 }: RegistrarAccionParams): Promise<void> {
-  const session = await auth();
-
-  // Si no hay sesión activa no registramos (no debería pasar con el middleware)
-  if (!session?.user?.id) return;
+  if (!usuarioId) return;
 
   await prisma.registroAccion.create({
     data: {
-      usuarioId: session.user.id,
+      usuarioId,
       accion,
       entidad,
       entidadId,

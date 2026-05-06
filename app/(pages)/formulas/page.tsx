@@ -4,6 +4,7 @@ import { DataTable } from "./data-table";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { columns } from "./colums";
+export const dynamic = 'force-dynamic'
 
 
 export default async function FormulasPage() {
