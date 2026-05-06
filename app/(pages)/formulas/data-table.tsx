@@ -14,12 +14,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Pencil } from "lucide-react"
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
   data: TData[]
   title: string
   precioTotal: number
+  onEdit?: () => void  // ← abre el Sheet de edición de esta fórmula
 }
 
 const formatearPrecio = (amount: number) =>
@@ -33,6 +35,7 @@ export function DataTable<TData, TValue>({
   data,
   title,
   precioTotal,
+  onEdit,
 }: DataTableProps<TData, TValue>) {
   const table = useReactTable({
     data,
@@ -43,10 +46,21 @@ export function DataTable<TData, TValue>({
   return (
     <div className="overflow-hidden rounded-md border shadow-xl">
 
-      <div className="px-4 py-3 bg-green-800 text-white">
+      {/* Header — click abre el Sheet de edición */}
+      <div className="px-4 py-3 bg-green-800 text-white flex items-center justify-between">
         <h2 className="text-base font-medium uppercase tracking-wide">
           {title}
         </h2>
+        {onEdit && (
+          <button
+            onClick={onEdit}
+            title="Editar fórmula"
+            className="flex items-center gap-1 text-xs text-white/80 hover:text-white transition-colors"
+          >
+            <Pencil className="w-4 h-4" />
+            <span>Editar</span>
+          </button>
+        )}
       </div>
 
       <Table>

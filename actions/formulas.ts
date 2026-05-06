@@ -4,11 +4,13 @@ import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { Prisma } from "@/generated/prisma";
 import { serializarFormula } from "@/types";
+import { auth } from "@/auth"
 import type {
   Formula,
   CreateFormulaDTO,
   ISODateString,
 } from "@/types";
+import { registrarAccion } from "@/lib/registrarAccion";
 
 // ─── Tipo de retorno ──────────────────────────────────────────────────────────
 
@@ -24,11 +26,13 @@ export interface FormulaListItem {
   createdAt: ISODateString;
   items: {
     id: string;
-    cantidad: number;          // ← Decimal serializado a number
+    cantidad: number;
     nombreIngrediente: string;
-    precioIngrediente: number; // precio unitario del insumo O de la sub-fórmula
+    precioIngrediente: number;
+    insumoId: string | null;
+    subFormulaId: string | null;
   }[];
-  precioTotal: number;         // Σ (precioIngrediente × cantidad)
+  precioTotal: number;
 }
 
 // ─── Tipo auxiliar para la query profunda ────────────────────────────────────
@@ -68,11 +72,11 @@ function calcularPrecioDetalle(item: FormulaDetalleConIngrediente): number {
       const precio = subItem.insumo
         ? subItem.insumo.price.toNumber()
         : subItem.subFormula
-        ? subItem.subFormula.items.reduce((t, i) => {
+          ? subItem.subFormula.items.reduce((t, i) => {
             const c = i.cantidad.toNumber(); // ← era parseFloat(string)
             return t + (i.insumo ? i.insumo.price.toNumber() : 0) * c;
           }, 0)
-        : 0;
+          : 0;
       return total + precio * cantidad;
     }, 0);
   }
@@ -113,7 +117,7 @@ export async function getFormulasAction(): Promise<FormulaListItem[]> {
   return formulas.map((formula) => {
     const items = formula.items.map((item) => {
       const precioIngrediente = calcularPrecioDetalle(item);
-      const cantidad = item.cantidad.toNumber(); // ← era parseFloat(string)
+      const cantidad = item.cantidad.toNumber();
       return {
         id: item.id,
         cantidad,
@@ -121,10 +125,14 @@ export async function getFormulasAction(): Promise<FormulaListItem[]> {
           item.insumo?.name ?? item.subFormula?.name ?? "Desconocido",
         precioIngrediente,
         _subtotal: precioIngrediente * cantidad,
+        insumoId: item.insumoId,
+        subFormulaId: item.subFormulaId,
       };
     });
 
-    const precioTotal = items.reduce((total, item) => total + item._subtotal, 0);
+    const sumaSubtotales = items.reduce((total, item) => total + item._subtotal, 0);
+    const sumaCantidades = items.reduce((total, item) => total + item.cantidad, 0);
+    const precioTotal = sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0;
 
     return {
       id: formula.id,
@@ -166,8 +174,8 @@ export async function createFormulaAction(
         name: data.name,
         items: {
           create: data.items.map((item) => ({
-            cantidad:     new Prisma.Decimal(item.cantidad), // ← string → Decimal
-            insumoId:     item.insumoId     ?? null,
+            cantidad: new Prisma.Decimal(item.cantidad), // ← string → Decimal
+            insumoId: item.insumoId ?? null,
             subFormulaId: item.subFormulaId ?? null,
           })),
         },
@@ -202,5 +210,59 @@ export async function deleteFormulaAction(
   } catch (error) {
     console.error("[deleteFormulaAction]", error);
     return { success: false, error: "Error al eliminar la fórmula." };
+  }
+}
+export async function updateFormulaAction(
+  id: string,
+  data: CreateFormulaDTO
+): Promise<ActionResult<Formula>> {
+  const itemsInvalidos = data.items.filter(
+    (item) => !item.insumoId && !item.subFormulaId
+  );
+  if (itemsInvalidos.length > 0) {
+    return { success: false, error: "Cada ingrediente debe tener un insumo o sub-fórmula." };
+  }
+
+  try {
+    const session = await auth();
+    const usuarioId = session?.user?.id ?? "";
+    const anterior = await prisma.formula.findUnique({ where: { id } });
+
+    const raw = await prisma.formula.update({
+      where: { id },
+      data: {
+        name: data.name,
+        items: {
+          // Borramos todos los items actuales y creamos los nuevos
+          deleteMany: {},
+          create: data.items.map((item) => ({
+            cantidad: new Prisma.Decimal(item.cantidad),
+            insumoId: item.insumoId ?? null,
+            subFormulaId: item.subFormulaId ?? null,
+          })),
+        },
+      },
+    });
+
+    await registrarAccion({
+      usuarioId,
+      accion: "EDITAR",
+      entidad: "Formula",
+      entidadId: raw.id,
+      detalle: {
+        anterior: { name: anterior?.name, cantidadItems: anterior ? undefined : 0 },
+        nuevo: { name: raw.name, cantidadItems: data.items.length },
+      },
+    });
+
+    revalidatePath("/formulas");
+    return { success: true, data: serializarFormula(raw) };
+
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      return { success: false, error: "Ya existe una fórmula con ese nombre." };
+    }
+    console.error("[updateFormulaAction]", error);
+    return { success: false, error: "Error al actualizar la fórmula." };
   }
 }

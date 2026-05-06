@@ -1,14 +1,17 @@
+// app/(pages)/formulas/page.tsx
+import { Button } from "@/components/ui/button"
+import Link from "next/link"
+import { getFormulasAction } from "@/actions/formulas"
+import { getInsumosAction } from "@/actions/insumos"
+import { FormulasClient } from "@/components/formulas/FormulasClient"
 
-import { getFormulasAction } from "@/actions/formulas";
-import { DataTable } from "./data-table";
-import { Button } from "@/components/ui/button";
-import Link from "next/link";
-import { columns } from "./colums";
 export const dynamic = 'force-dynamic'
 
-
 export default async function FormulasPage() {
-  const formulas = await getFormulasAction();
+  const [formulas, insumos] = await Promise.all([
+    getFormulasAction(),
+    getInsumosAction(),
+  ])
 
   return (
     <div className="flex flex-col items-center">
@@ -28,18 +31,11 @@ export default async function FormulasPage() {
         </p>
       )}
 
-      {formulas.map((formula) => (
-        <div className="p-10 w-3/4" key={formula.id}>
-          <DataTable
-            columns={columns}
-            data={formula.items}
-            title={formula.name}
-            precioTotal={formula.precioTotal}
-          />
-        </div>
-      ))}
+      <FormulasClient
+        initialData={formulas}
+        listaInsumos={insumos}
+        listaFormulas={formulas}   // las fórmulas existentes pueden ser sub-fórmulas
+      />
     </div>
-  );
+  )
 }
-
-// TODO: FAB para volver al inicio de la página
