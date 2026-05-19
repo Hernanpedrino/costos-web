@@ -1,4 +1,4 @@
-// app/(pages)/formulas/page.tsx
+
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { getFormulasAction } from "@/actions/formulas"

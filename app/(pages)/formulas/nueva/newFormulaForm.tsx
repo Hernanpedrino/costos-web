@@ -1,25 +1,26 @@
 "use client";
 
-import { useState } from "react";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, useForm, useFieldArray } from "react-hook-form";
-import * as z from "zod";
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { zodResolver } from "@hookform/resolvers/zod"
+import { Controller, useForm, useFieldArray } from "react-hook-form"
+import * as z from "zod"
 
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from "@/components/ui/card"
 import {
   Field,
   FieldError,
   FieldGroup,
   FieldLabel,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+} from "@/components/ui/field"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -28,17 +29,10 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@/components/ui/select"
 
-
-import type { Insumo, Formula } from "@/types";
-import { createFormulaAction } from "@/actions/formulas";
-
-// ─── Schema ───────────────────────────────────────────────────────────────────
-// ingredienteId lleva un prefijo que identifica el tipo:
-//   "insumo:uuid"   → se mapea a insumoId en el DTO
-//   "formula:uuid"  → se mapea a subFormulaId en el DTO
-// Así el Select puede mezclar ambos tipos sin un flag separado.
+import { createFormulaAction } from "@/actions/formulas"
+import type { Insumo, Formula } from "@/types"
 
 const formSchema = z.object({
   name: z.string().min(5, "El nombre debe tener al menos 5 caracteres"),
@@ -54,79 +48,78 @@ const formSchema = z.object({
         ),
     })
   ).min(1, "Agregá al menos un ingrediente"),
-});
+})
 
-type FormValues = z.infer<typeof formSchema>;
-
-// ─── Props ────────────────────────────────────────────────────────────────────
+type FormValues = z.infer<typeof formSchema>
 
 interface NewFormulaFormProps {
-  listaInsumos: Insumo[];
-  listaFormulas: Pick<Formula, "id" | "name">[];
+  listaInsumos:  Insumo[]
+  listaFormulas: Pick<Formula, "id" | "name">[]
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/** Convierte el ingredienteId con prefijo al campo correcto del DTO */
 function parsearIngredienteId(ingredienteId: string) {
-  const [tipo, id] = ingredienteId.split(":");
+  const [tipo, id] = ingredienteId.split(":")
   return {
     insumoId:     tipo === "insumo"  ? id : undefined,
     subFormulaId: tipo === "formula" ? id : undefined,
-  };
+  }
 }
 
-// ─── Componente ───────────────────────────────────────────────────────────────
-
 export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormProps) => {
+  const router = useRouter()
   const [feedback, setFeedback] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
+    type: "success" | "error"
+    message: string
+  } | null>(null)
+
+  // Ordenar A-Z al recibir las listas
+  const insumosOrdenados  = [...listaInsumos].sort((a, b) => a.name.localeCompare(b.name))
+  const formulasOrdenadas = [...listaFormulas].sort((a, b) => a.name.localeCompare(b.name))
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: { name: "", items: [] },
-  });
+  })
 
   const { fields, replace } = useFieldArray({
     control: form.control,
     name: "items",
-  });
+  })
 
-  // Selector de cantidad de filas — mantiene valores existentes al cambiar
   const handleCantidadChange = (val: string) => {
-    const cantidad = parseInt(val, 10);
-    if (isNaN(cantidad)) return;
-    const actuales = form.getValues("items") ?? [];
+    const cantidad = parseInt(val, 10)
+    if (isNaN(cantidad)) return
+    const actuales = form.getValues("items") ?? []
     replace(
       Array.from({ length: cantidad }, (_, i) =>
         actuales[i] ?? { ingredienteId: "", cantidad: "" }
       )
-    );
-  };
+    )
+  }
 
   const onSubmit = async (data: FormValues) => {
-    setFeedback(null);
+    setFeedback(null)
 
     const result = await createFormulaAction({
-      name: data.name,
+      name:  data.name,
       items: data.items.map((item) => ({
         cantidad: item.cantidad,
         ...parsearIngredienteId(item.ingredienteId),
       })),
-    });
+    })
 
     if (result.success) {
       setFeedback({
         type: "success",
         message: `Fórmula "${result.data.name}" guardada correctamente.`,
-      });
-      form.reset();
+      })
+      form.reset()
+      router.push("/formulas")
+      router.refresh()
     } else {
-      setFeedback({ type: "error", message: result.error });
+      setFeedback({ type: "error", message: result.error })
     }
-  };
+  }
 
   return (
     <div className="text-2xl w-1/2">
@@ -138,16 +131,12 @@ export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormPr
         <CardContent>
           <form id="form-formula" onSubmit={form.handleSubmit(onSubmit)}>
             <FieldGroup>
-
-              {/* Nombre */}
               <Controller
                 name="name"
                 control={form.control}
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
-                    <FieldLabel htmlFor="formula-name">
-                      Nombre de la fórmula
-                    </FieldLabel>
+                    <FieldLabel htmlFor="formula-name">Nombre de la fórmula</FieldLabel>
                     <Input
                       {...field}
                       id="formula-name"
@@ -155,14 +144,11 @@ export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormPr
                       placeholder="Condimento para chorizos"
                       autoComplete="off"
                     />
-                    {fieldState.invalid && (
-                      <FieldError errors={[fieldState.error]} />
-                    )}
+                    {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                   </Field>
                 )}
               />
 
-              {/* Cantidad de ingredientes */}
               <Field>
                 <FieldLabel>Cantidad de ingredientes</FieldLabel>
                 <Select onValueChange={handleCantidadChange}>
@@ -170,7 +156,8 @@ export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormPr
                     <SelectValue placeholder="Seleccioná la cantidad" />
                   </SelectTrigger>
                   <SelectContent>
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
+                    {/* ← hasta 20 ingredientes */}
+                    {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
                       <SelectItem key={num} value={num.toString()}>
                         {num} {num === 1 ? "ingrediente" : "ingredientes"}
                       </SelectItem>
@@ -179,83 +166,53 @@ export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormPr
                 </Select>
               </Field>
 
-              {/* Filas de ingredientes */}
               <div className="flex flex-col gap-6 mt-4">
                 {fields.map((field, index) => (
-                  <div
-                    key={field.id}
-                    className="p-4 border rounded-lg space-y-4"
-                  >
-                    <h4 className="font-medium text-sm">
-                      Ingrediente #{index + 1}
-                    </h4>
+                  <div key={field.id} className="p-4 border rounded-lg space-y-4">
+                    <h4 className="font-medium text-sm">Ingrediente #{index + 1}</h4>
 
-                    {/* Select de ingrediente — agrupa insumos y fórmulas */}
                     <Controller
                       name={`items.${index}.ingredienteId`}
                       control={form.control}
                       render={({ field, fieldState }) => (
                         <Field data-invalid={fieldState.invalid}>
                           <FieldLabel>Ingrediente</FieldLabel>
-                          <Select
-                            onValueChange={field.onChange}
-                            value={field.value ?? ""}
-                          >
+                          <Select onValueChange={field.onChange} value={field.value ?? ""}>
                             <SelectTrigger aria-invalid={fieldState.invalid}>
                               <SelectValue placeholder="Seleccioná un ingrediente" />
                             </SelectTrigger>
                             <SelectContent>
-
-                              {/* ── Insumos ── */}
-                              {listaInsumos.length > 0 && (
+                              {insumosOrdenados.length > 0 && (
                                 <SelectGroup>
                                   <SelectLabel className="text-xs text-muted-foreground">
                                     Insumos
                                   </SelectLabel>
-                                  {listaInsumos.map((insumo) => (
-                                    <SelectItem
-                                      key={insumo.id}
-                                      value={`insumo:${insumo.id}`}
-                                    >
+                                  {insumosOrdenados.map((insumo) => (
+                                    <SelectItem key={insumo.id} value={`insumo:${insumo.id}`}>
                                       {insumo.name}
                                     </SelectItem>
                                   ))}
                                 </SelectGroup>
                               )}
-
-                              {/* ── Fórmulas (sub-fórmulas) ── */}
-                              {listaFormulas.length > 0 && (
+                              {formulasOrdenadas.length > 0 && (
                                 <SelectGroup>
                                   <SelectLabel className="text-xs text-muted-foreground">
                                     Fórmulas
                                   </SelectLabel>
-                                  {listaFormulas.map((formula) => (
-                                    <SelectItem
-                                      key={formula.id}
-                                      value={`formula:${formula.id}`}
-                                    >
+                                  {formulasOrdenadas.map((formula) => (
+                                    <SelectItem key={formula.id} value={`formula:${formula.id}`}>
                                       {formula.name}
                                     </SelectItem>
                                   ))}
                                 </SelectGroup>
                               )}
-
-                              {listaInsumos.length === 0 &&
-                                listaFormulas.length === 0 && (
-                                  <SelectItem value="" disabled>
-                                    No hay ingredientes disponibles
-                                  </SelectItem>
-                                )}
                             </SelectContent>
                           </Select>
-                          {fieldState.invalid && (
-                            <FieldError errors={[fieldState.error]} />
-                          )}
+                          {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                         </Field>
                       )}
                     />
 
-                    {/* Cantidad */}
                     <Controller
                       name={`items.${index}.cantidad`}
                       control={form.control}
@@ -269,28 +226,25 @@ export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormPr
                             type="number"
                             step="0.0001"
                             min="0"
+                            // ← evita que el scroll cambie el valor
+                            onWheel={(e) => e.currentTarget.blur()}
                           />
-                          {fieldState.invalid && (
-                            <FieldError errors={[fieldState.error]} />
-                          )}
+                          {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                         </Field>
                       )}
                     />
                   </div>
                 ))}
               </div>
-
             </FieldGroup>
           </form>
 
           {feedback && (
-            <p
-              className={`mt-4 text-sm px-3 py-2 rounded-md ${
-                feedback.type === "success"
-                  ? "bg-green-50 text-green-800 border border-green-200"
-                  : "bg-red-50 text-red-700 border border-red-200"
-              }`}
-            >
+            <p className={`mt-4 text-sm px-3 py-2 rounded-md ${
+              feedback.type === "success"
+                ? "bg-green-50 text-green-800 border border-green-200"
+                : "bg-red-50 text-red-700 border border-red-200"
+            }`}>
               {feedback.message}
             </p>
           )}
@@ -312,5 +266,5 @@ export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormPr
         </CardFooter>
       </Card>
     </div>
-  );
-};
+  )
+}

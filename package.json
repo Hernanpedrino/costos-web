@@ -27,6 +27,7 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-hook-form": "^7.71.2",
+    "recharts": "^3.8.1",
     "tailwind-merge": "^3.5.0",
     "zod": "^4.3.6"
   },
@@ -39,7 +40,7 @@
     "@types/react-dom": "^19",
     "eslint": "^10.0.0",
     "eslint-config-next": "^0.2.4",
-    "prisma": "^7.8.0",
+    "prisma": "^6.19.3",
     "shadcn": "^3.8.5",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",

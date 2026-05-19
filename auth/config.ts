@@ -1,9 +1,9 @@
-// auth/config.ts
-// Configuración de NextAuth separada para poder importarla en proxy.ts
+
 import type { NextAuthConfig } from "next-auth"
 
 export const authConfig: NextAuthConfig = {
   session: { strategy: "jwt" },
+  trustHost: true,
   pages: {
     signIn: "/login",
   },

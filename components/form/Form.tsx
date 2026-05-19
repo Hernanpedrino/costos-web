@@ -22,12 +22,7 @@ import {
 import { Input } from "@/components/ui/input";
 
 import { createInsumoAction } from "@/actions/insumos";
-
-// ─── Schema ───────────────────────────────────────────────────────────────────
-// Zod v4: usar z.number() en lugar de z.coerce.number().
-// z.coerce tipea el input como `unknown` en v4, lo que rompe la inferencia
-// del Resolver de react-hook-form. La conversión string→number la maneja
-// el Input con e.target.valueAsNumber.
+import type { Insumo } from "@/types";
 
 const formSchema = z.object({
   name: z
@@ -46,9 +41,11 @@ const formSchema = z.object({
 
 type InsumoFormValues = z.infer<typeof formSchema>;
 
-// ─── Componente ───────────────────────────────────────────────────────────────
+interface FormProps {
+  onCreated?: (insumo: Insumo) => void;
+}
 
-export const Form = () => {
+export const Form = ({ onCreated }: FormProps) => {
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
     message: string;
@@ -56,17 +53,12 @@ export const Form = () => {
 
   const form = useForm<InsumoFormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      name: "",
-      suplier: "",
-      price: undefined,
-    },
+    defaultValues: { name: "", suplier: "", price: undefined },
   });
 
   async function onSubmit(data: InsumoFormValues) {
     setFeedback(null);
 
-    // Zod produce price: number → lo convertimos a string para CreateInsumoDTO
     const result = await createInsumoAction({
       name:    data.name,
       suplier: data.suplier,
@@ -74,11 +66,9 @@ export const Form = () => {
     });
 
     if (result.success) {
-      setFeedback({
-        type: "success",
-        message: `"${result.data.name}" agregado correctamente.`,
-      });
+      setFeedback({ type: "success", message: `"${result.data.name}" agregado correctamente.` });
       form.reset();
+      onCreated?.(result.data);  // notifica al padre con el nuevo insumo
     } else {
       setFeedback({ type: "error", message: result.error });
     }
@@ -94,15 +84,12 @@ export const Form = () => {
         <CardContent>
           <form id="form-insumos" onSubmit={form.handleSubmit(onSubmit)}>
             <FieldGroup>
-
               <Controller
                 name="name"
                 control={form.control}
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
-                    <FieldLabel htmlFor="insumo-name">
-                      Nombre del insumo
-                    </FieldLabel>
+                    <FieldLabel htmlFor="insumo-name">Nombre del insumo</FieldLabel>
                     <Input
                       {...field}
                       id="insumo-name"
@@ -110,9 +97,7 @@ export const Form = () => {
                       placeholder="Ají molido"
                       autoComplete="off"
                     />
-                    {fieldState.invalid && (
-                      <FieldError errors={[fieldState.error]} />
-                    )}
+                    {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                   </Field>
                 )}
               />
@@ -122,9 +107,7 @@ export const Form = () => {
                 control={form.control}
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
-                    <FieldLabel htmlFor="insumo-suplier">
-                      Proveedor
-                    </FieldLabel>
+                    <FieldLabel htmlFor="insumo-suplier">Proveedor</FieldLabel>
                     <Input
                       {...field}
                       id="insumo-suplier"
@@ -132,9 +115,7 @@ export const Form = () => {
                       placeholder="Alimentos del Plata"
                       autoComplete="off"
                     />
-                    {fieldState.invalid && (
-                      <FieldError errors={[fieldState.error]} />
-                    )}
+                    {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                   </Field>
                 )}
               />
@@ -145,12 +126,6 @@ export const Form = () => {
                 render={({ field, fieldState }) => (
                   <Field data-invalid={fieldState.invalid}>
                     <FieldLabel htmlFor="insumo-price">Precio</FieldLabel>
-                    {/*
-                      No usamos {...field} directo: el input HTML devuelve string
-                      pero el schema espera number. Desestructuramos field y
-                      sobreescribimos onChange con valueAsNumber para que
-                      react-hook-form reciba siempre un number.
-                    */}
                     <Input
                       name={field.name}
                       ref={field.ref}
@@ -165,24 +140,19 @@ export const Form = () => {
                       step="0.01"
                       min="0"
                     />
-                    {fieldState.invalid && (
-                      <FieldError errors={[fieldState.error]} />
-                    )}
+                    {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                   </Field>
                 )}
               />
-
             </FieldGroup>
           </form>
 
           {feedback && (
-            <p
-              className={`mt-4 text-sm px-3 py-2 rounded-md ${
-                feedback.type === "success"
-                  ? "bg-green-50 text-green-800 border border-green-200"
-                  : "bg-red-50 text-red-700 border border-red-200"
-              }`}
-            >
+            <p className={`mt-4 text-sm px-3 py-2 rounded-md ${
+              feedback.type === "success"
+                ? "bg-green-50 text-green-800 border border-green-200"
+                : "bg-red-50 text-red-700 border border-red-200"
+            }`}>
               {feedback.message}
             </p>
           )}

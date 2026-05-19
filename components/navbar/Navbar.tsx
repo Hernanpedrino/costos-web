@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { signOut } from "next-auth/react";
+import { useSession } from "next-auth/react"
+
 
 export const Navbar = () => {
+  const { data: session } = useSession()
   return (
     <header className="text-gray-600 body-font">
       <div className="container mx-auto flex flex-wrap p-5 flex-col md:flex-row items-center">
@@ -17,10 +20,15 @@ export const Navbar = () => {
         </Link>
 
         <nav className="md:mr-auto md:ml-4 md:py-1 md:pl-4 md:border-l md:border-gray-400 flex flex-wrap items-center text-base justify-center">
-          <Link href="/insumos"      className="mr-5 hover:text-gray-900">Insumos</Link>
-          <Link href="/formulas"     className="mr-5 hover:text-gray-900">Fórmulas</Link>
+          <Link href="/insumos" className="mr-5 hover:text-gray-900">Insumos</Link>
+          <Link href="/formulas" className="mr-5 hover:text-gray-900">Fórmulas</Link>
           <Link href="/estadisticas" className="mr-5 hover:text-gray-900">Estadísticas</Link>
-          <Link href="/informes"     className="mr-5 hover:text-gray-900">Informes</Link>
+          <Link href="/informes" className="mr-5 hover:text-gray-900">Informes</Link>
+          {session?.user?.role === "ADMIN" && (
+            <Link href="/admin/usuarios" className="mr-5 hover:text-gray-900">
+              Usuarios
+            </Link>
+          )}
         </nav>
 
         {/* Logout directo desde el cliente — evita el problema de imports de next-auth */}

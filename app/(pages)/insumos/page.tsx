@@ -18,8 +18,6 @@ export default async function InsumosPage() {
       {/* Server pasa los datos, Client maneja la interacción */}
       <InsumosClient initialData={data} />
 
-      <Separator orientation="horizontal" className="my-10" />
-      <Form />
     </div>
   )
 }
