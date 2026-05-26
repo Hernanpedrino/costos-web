@@ -83,8 +83,9 @@ model Insumo {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  usadoEn          FormulaDetalle[]
-  historialPrecios HistorialPrecioInsumo[]
+  usadoEn           FormulaDetalle[]
+  historialPrecios  HistorialPrecioInsumo[]
+  historialFormulas HistorialPrecioFormula[]
 }
 
 // ─── Fórmulas ─────────────────────────────────────────────────────────────────
@@ -95,19 +96,20 @@ model Formula {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items           FormulaDetalle[]
-  comoIngrediente FormulaDetalle[] @relation("SubFormula")
+  items            FormulaDetalle[]
+  comoIngrediente  FormulaDetalle[]         @relation("SubFormula")
+  historialPrecios HistorialPrecioFormula[]
 }
 
 model FormulaDetalle {
   id       String  @id @default(uuid())
   cantidad Decimal @db.Decimal(10, 4)
 
-  formulaId    String
-  formula      Formula  @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+  formulaId String
+  formula   Formula @relation(fields: [formulaId], references: [id], onDelete: Cascade)
 
-  insumoId     String?
-  insumo       Insumo?  @relation(fields: [insumoId], references: [id])
+  insumoId String?
+  insumo   Insumo? @relation(fields: [insumoId], references: [id])
 
   subFormulaId String?
   subFormula   Formula? @relation("SubFormula", fields: [subFormulaId], references: [id])
@@ -115,4 +117,18 @@ model FormulaDetalle {
   @@index([formulaId])
   @@index([insumoId])
   @@index([subFormulaId])
+}
+
+model HistorialPrecioFormula {
+  id        String   @id @default(uuid())
+  formulaId String
+  formula   Formula  @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+  precio    Decimal  @db.Decimal(10, 2)
+  // El insumo que disparó el cambio
+  insumoId  String?
+  insumo    Insumo?  @relation(fields: [insumoId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  @@index([formulaId])
+  @@index([createdAt])
 }

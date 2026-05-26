@@ -40,7 +40,7 @@
     "@types/react-dom": "^19",
     "eslint": "^10.0.0",
     "eslint-config-next": "^0.2.4",
-    "prisma": "^6.19.3",
+    "prisma": "^7.8.0",
     "shadcn": "^3.8.5",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",

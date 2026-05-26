@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@/generated/prisma";
 import { serializarInsumo } from "@/types";
 import { registrarAccion } from "@/lib/registrarAccion";
+import { guardarSnapshotFormulas } from "@/lib/snapshotFormulas"
 import type { Insumo, CreateInsumoDTO, UpdateInsumoDTO } from "@/types";
 import { auth } from "@/auth"
 
@@ -80,8 +81,8 @@ export async function updateInsumoAction(
   const { id, price, ...rest } = data;
   const session = await auth()
   const usuarioId = session?.user?.id ?? ""
+
   try {
-    // Guardamos el estado anterior para el detalle de auditoría
     const anterior = await prisma.insumo.findUnique({ where: { id } });
 
     const raw = await prisma.insumo.update({
@@ -92,6 +93,22 @@ export async function updateInsumoAction(
       },
     });
 
+    const precioAntes = anterior?.price.toNumber() ?? 0
+    const precioDespues = raw.price.toNumber()
+    const precioCambio = precioAntes !== precioDespues
+
+    if (precioCambio && usuarioId) {
+      await prisma.historialPrecioInsumo.create({
+        data: {
+          insumoId: id,
+          precioAntes: new Prisma.Decimal(precioAntes),
+          precioDespues: raw.price,
+          usuarioId,
+        },
+      })
+      await guardarSnapshotFormulas(id)
+    }
+
     await registrarAccion({
       usuarioId,
       accion: "EDITAR",
@@ -100,14 +117,13 @@ export async function updateInsumoAction(
       detalle: {
         anterior: {
           name: anterior?.name,
-          suplier: anterior?.suplier,
           price: anterior?.price.toString(),
         },
         nuevo: {
           name: raw.name,
-          suplier: raw.suplier,
           price: raw.price.toString(),
         },
+        precioCambio,
       },
     });
 
