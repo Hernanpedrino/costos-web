@@ -33,9 +33,9 @@ export const Navbar = () => {
 
         {/* Logout directo desde el cliente — evita el problema de imports de next-auth */}
         <button
-          onClick={() => signOut({ callbackUrl: "/login" })}
+          onClick={() => signOut({ callbackUrl: `${window.location.origin}/login` })}
           title="Cerrar sesión"
-          className="flex items-center gap-2 text-sm text-gray-500 hover:text-red-600 transition-colors"
+          className="..."
         >
           <LogOut className="w-5 h-5" />
           <span className="hidden md:inline">Salir</span>

@@ -5,13 +5,13 @@ import { prisma } from "@/lib/prisma"
 import type { ISODateString } from "@/types"
 
 export interface InformeFormula {
-  id:             string
-  nombre:         string
-  precioActual:   number
+  id: string
+  nombre: string
+  precioActual: number
   precioAnterior: number | null
-  variacionPct:   number | null   // null = sin historial previo
-  tendencia:      "sube" | "baja" | "igual" | "nuevo"
-  ultimoCambio:   ISODateString | null
+  variacionPct: number | null   // null = sin historial previo
+  tendencia: "sube" | "baja" | "igual" | "nuevo"
+  ultimoCambio: ISODateString | null
 }
 
 export async function getInformeFormulasAction(): Promise<InformeFormula[]> {
@@ -40,7 +40,7 @@ export async function getInformeFormulasAction(): Promise<InformeFormula[]> {
       // Último snapshot y el anterior para comparar
       historialPrecios: {
         orderBy: { createdAt: "desc" },
-        take:    2,
+        take: 2,
       },
     },
     orderBy: { name: "asc" },
@@ -54,8 +54,8 @@ export async function getInformeFormulasAction(): Promise<InformeFormula[]> {
     const precioAnterior = historial.length >= 2
       ? historial[1].precio.toNumber()   // el registro anterior al último
       : historial.length === 1
-      ? historial[0].precio.toNumber()   // solo hay un snapshot
-      : null
+        ? historial[0].precio.toNumber()   // solo hay un snapshot
+        : null
 
     const ultimoCambio = historial.length > 0
       ? historial[0].createdAt.toISOString()
@@ -66,14 +66,14 @@ export async function getInformeFormulasAction(): Promise<InformeFormula[]> {
 
     if (precioAnterior !== null && precioAnterior > 0) {
       variacionPct = ((precioActual - precioAnterior) / precioAnterior) * 100
-      if (variacionPct > 0.01)       tendencia = "sube"
+      if (variacionPct > 0.01) tendencia = "sube"
       else if (variacionPct < -0.01) tendencia = "baja"
-      else                           tendencia = "igual"
+      else tendencia = "igual"
     }
 
     return {
-      id:             formula.id,
-      nombre:         formula.name,
+      id: formula.id,
+      nombre: formula.name,
       precioActual,
       precioAnterior,
       variacionPct,
@@ -89,11 +89,11 @@ type ItemConIngrediente = any  // usa el tipo real de Prisma en tu proyecto
 
 function calcularPrecioNivel3(items: ItemConIngrediente[]): number {
   const subtotales = items.map((i: ItemConIngrediente) => ({
-    precio:   i.insumo ? i.insumo.price.toNumber() : 0,
+    precio: i.insumo ? i.insumo.price.toNumber() : 0,
     cantidad: i.cantidad.toNumber(),
   }))
   const sumaSubtotales = subtotales.reduce((t: number, i: any) => t + i.precio * i.cantidad, 0)
-  const sumaCantidades  = subtotales.reduce((t: number, i: any) => t + i.cantidad, 0)
+  const sumaCantidades = subtotales.reduce((t: number, i: any) => t + i.cantidad, 0)
   return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
 }
 
@@ -105,12 +105,12 @@ function calcularPrecioDetalle(item: ItemConIngrediente): number {
       precio: subItem.insumo
         ? subItem.insumo.price.toNumber()
         : subItem.subFormula
-        ? calcularPrecioNivel3(subItem.subFormula.items)
-        : 0,
+          ? calcularPrecioNivel3(subItem.subFormula.items)
+          : 0,
       cantidad: subItem.cantidad.toNumber(),
     }))
     const sumaSubtotales = subItems.reduce((t: number, i: any) => t + i.precio * i.cantidad, 0)
-    const sumaCantidades  = subItems.reduce((t: number, i: any) => t + i.cantidad, 0)
+    const sumaCantidades = subItems.reduce((t: number, i: any) => t + i.cantidad, 0)
     return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
   }
 
@@ -119,12 +119,11 @@ function calcularPrecioDetalle(item: ItemConIngrediente): number {
 
 function calcularPrecioFormula(items: ItemConIngrediente[]): number {
   const subtotales = items.map((item) => ({
-    precio:   calcularPrecioDetalle(item),
+    precio: calcularPrecioDetalle(item),
     cantidad: item.cantidad.toNumber(),
   }))
 
   const sumaSubtotales = subtotales.reduce((t, i) => t + i.precio * i.cantidad, 0)
-  const sumaCantidades  = subtotales.reduce((t, i) => t + i.cantidad, 0)
-
+  const sumaCantidades = subtotales.reduce((t, i) => t + i.cantidad, 0)
   return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
 }
