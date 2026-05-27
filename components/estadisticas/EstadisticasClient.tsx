@@ -3,13 +3,8 @@
 
 import { useState, useTransition } from "react"
 import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
+  LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, BarChart, Bar, Cell,
 } from "recharts"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -19,6 +14,7 @@ import {
   buscarInsumosAction,
   type HistorialInsumo,
   type TopVariacion,
+  type InsumoMasUsado,
 } from "@/actions/estadisticas"
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -36,7 +32,9 @@ const colorVariacion = (pct: number) =>
 
 const signo = (pct: number) => (pct > 0 ? "+" : "")
 
-// ─── Card del Top 5 ───────────────────────────────────────────────────────────
+const VERDE = ["#052e16","#14532d","#166534","#15803d","#16a34a"]
+
+// ─── Top 5 variación ──────────────────────────────────────────────────────────
 
 function TopCard({ item, onSelect }: { item: TopVariacion; onSelect: (id: string) => void }) {
   return (
@@ -65,7 +63,65 @@ function TopCard({ item, onSelect }: { item: TopVariacion; onSelect: (id: string
   )
 }
 
-// ─── Gráfico + tabla de historial ─────────────────────────────────────────────
+// ─── Top 5 más usados ─────────────────────────────────────────────────────────
+
+function TopInsumosUsados({ items }: { items: InsumoMasUsado[] }) {
+  if (items.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground text-center">
+        No hay datos disponibles.
+      </p>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Cards */}
+      <div className="flex flex-col gap-3">
+        {items.map((item, i) => (
+          <div key={item.id} className="flex items-center gap-3 border rounded-lg px-4 py-3">
+            <span
+              className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
+              style={{ backgroundColor: VERDE[i] }}
+            >
+              {i + 1}
+            </span>
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-sm truncate" title={item.nombre}>{item.nombre}</p>
+              <p className="text-xs text-muted-foreground">
+                {item.cantFormulas} fórmula{item.cantFormulas !== 1 ? "s" : ""} · cantidad total: {item.cantTotal.toFixed(2)}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Gráfico de barras */}
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={items} layout="vertical" margin={{ left: 10, right: 20 }}>
+          <XAxis type="number" tick={{ fontSize: 11 }} />
+          <YAxis
+            type="category"
+            dataKey="nombre"
+            width={120}
+            tick={{ fontSize: 11 }}
+            tickFormatter={(v) => v.length > 15 ? v.substring(0, 15) + "…" : v}
+          />
+          <Tooltip
+            formatter={(value) => [`${Number(value ?? 0)} fórmulas`, "Uso"]}
+          />
+          <Bar dataKey="cantFormulas" radius={[0, 4, 4, 0]}>
+            {items.map((_, i) => (
+              <Cell key={i} fill={VERDE[i]} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+// ─── Historial detalle ────────────────────────────────────────────────────────
 
 function HistorialDetalle({ historial }: { historial: HistorialInsumo }) {
   if (historial.puntos.length === 0) {
@@ -77,17 +133,13 @@ function HistorialDetalle({ historial }: { historial: HistorialInsumo }) {
     )
   }
 
-  // Datos para el gráfico: mostramos el precio después de cada cambio + precio actual
-  const datosGrafico = [
-    ...historial.puntos.map((p) => ({
-      fecha:  formatearFecha(p.fecha),
-      precio: p.precioDespues,
-    })),
-  ]
+  const datosGrafico = historial.puntos.map((p) => ({
+    fecha:  formatearFecha(p.fecha),
+    precio: p.precioDespues,
+  }))
 
   return (
     <div className="border rounded-lg p-6 shadow-sm space-y-6">
-      {/* Header */}
       <div className="flex items-start justify-between">
         <div>
           <h3 className="font-semibold text-base">{historial.nombre}</h3>
@@ -100,7 +152,6 @@ function HistorialDetalle({ historial }: { historial: HistorialInsumo }) {
         </div>
       </div>
 
-      {/* Gráfico */}
       <ResponsiveContainer width="100%" height={220}>
         <LineChart data={datosGrafico} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -125,7 +176,6 @@ function HistorialDetalle({ historial }: { historial: HistorialInsumo }) {
         </LineChart>
       </ResponsiveContainer>
 
-      {/* Tabla de cambios */}
       <div className="overflow-hidden rounded-md border">
         <table className="w-full text-sm">
           <thead className="bg-muted/40">
@@ -167,11 +217,17 @@ function HistorialDetalle({ historial }: { historial: HistorialInsumo }) {
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export function EstadisticasClient({ topVariacion }: { topVariacion: TopVariacion[] }) {
-  const [query, setQuery]             = useState("")
-  const [resultados, setResultados]   = useState<{ id: string; name: string; price: number }[]>([])
-  const [historial, setHistorial]     = useState<HistorialInsumo | null>(null)
-  const [isPending, startTransition]  = useTransition()
+export function EstadisticasClient({
+  topVariacion,
+  topInsumosUsados,
+}: {
+  topVariacion:    TopVariacion[]
+  topInsumosUsados: InsumoMasUsado[]
+}) {
+  const [query, setQuery]            = useState("")
+  const [resultados, setResultados]  = useState<{ id: string; name: string; price: number }[]>([])
+  const [historial, setHistorial]    = useState<HistorialInsumo | null>(null)
+  const [isPending, startTransition] = useTransition()
 
   const buscar = () => {
     if (!query.trim()) return
@@ -192,30 +248,32 @@ export function EstadisticasClient({ topVariacion }: { topVariacion: TopVariacio
   }
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-12">
 
-      {/* ── Top 5 variación ── */}
-      {topVariacion.length > 0 && (
-        <section>
-          <h2 className="text-base font-semibold mb-4">
-            Top 5 — Mayor variación de precio
-          </h2>
-          <p className="text-xs text-muted-foreground mb-3">
-            Hacé clic en una card para ver el historial completo.
-          </p>
+      {/* ── Top 5 variación de precio ── */}
+      <section>
+        <h2 className="text-base font-semibold mb-1">Top 5 — Mayor variación de precio</h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          Hacé clic en una card para ver el historial completo.
+        </p>
+        {topVariacion.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {topVariacion.map((item) => (
               <TopCard key={item.id} item={item} onSelect={seleccionar} />
             ))}
           </div>
-        </section>
-      )}
+        ) : (
+          <p className="text-sm text-muted-foreground text-center">
+            Todavía no hay cambios de precio registrados.
+          </p>
+        )}
+      </section>
 
-      {topVariacion.length === 0 && (
-        <p className="text-sm text-muted-foreground text-center">
-          Todavía no hay cambios de precio registrados.
-        </p>
-      )}
+      {/* ── Top 5 insumos más usados ── */}
+      <section>
+        <h2 className="text-base font-semibold mb-4">Top 5 — Insumos más usados en fórmulas</h2>
+        <TopInsumosUsados items={topInsumosUsados} />
+      </section>
 
       {/* ── Buscador ── */}
       <section>
@@ -237,7 +295,6 @@ export function EstadisticasClient({ topVariacion }: { topVariacion: TopVariacio
           </Button>
         </div>
 
-        {/* Resultados de búsqueda */}
         {resultados.length > 0 && (
           <div className="mt-2 border rounded-lg overflow-hidden max-w-md shadow-sm">
             {resultados.map((r) => (
@@ -258,7 +315,7 @@ export function EstadisticasClient({ topVariacion }: { topVariacion: TopVariacio
         )}
       </section>
 
-      {/* ── Historial del insumo seleccionado ── */}
+      {/* ── Historial ── */}
       {isPending && (
         <p className="text-sm text-muted-foreground animate-pulse">Cargando historial...</p>
       )}
@@ -268,7 +325,6 @@ export function EstadisticasClient({ topVariacion }: { topVariacion: TopVariacio
           <HistorialDetalle historial={historial} />
         </section>
       )}
-
     </div>
   )
 }

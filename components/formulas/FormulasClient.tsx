@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from "react"
 import { columns } from "@/app/(pages)/formulas/colums"
 import { DataTable } from "@/app/(pages)/formulas/data-table"
 import { EditFormulaSheet } from "@/components/formulas/EditFormulaSheet"
+import { FormulaPieChart } from "@/components/formulas/FormulaPieChart"
 import { getFormulasAction } from "@/actions/formulas"
 import { Input } from "@/components/ui/input"
 import { ArrowUp } from "lucide-react"
@@ -26,16 +27,13 @@ export function FormulasClient({
   const [busqueda, setBusqueda]           = useState("")
   const [mostrarFab, setMostrarFab]       = useState(false)
 
-  // Mostrar FAB solo cuando el usuario scrolleó hacia abajo
   useEffect(() => {
     const handleScroll = () => setMostrarFab(window.scrollY > 300)
     window.addEventListener("scroll", handleScroll)
     return () => window.removeEventListener("scroll", handleScroll)
   }, [])
 
-  const scrollAlInicio = () => {
-    window.scrollTo({ top: 0, behavior: "smooth" })
-  }
+  const scrollAlInicio = () => window.scrollTo({ top: 0, behavior: "smooth" })
 
   const handleSaved = useCallback(async () => {
     const actualizadas = await getFormulasAction()
@@ -48,7 +46,6 @@ export function FormulasClient({
 
   return (
     <>
-      {/* Buscador */}
       <div className="w-full max-w-sm m-6">
         <Input
           type="text"
@@ -68,14 +65,29 @@ export function FormulasClient({
       )}
 
       {formulasFiltradas.map((formula) => (
-        <div className="p-10 w-3/4" key={formula.id}>
-          <DataTable
-            columns={columns}
-            data={formula.items}
-            title={formula.name}
-            precioTotal={formula.precioTotal}
-            onEdit={() => setFormulaEditar(formula)}
-          />
+        <div className="py-4 px-2 w-full max-w-5xl" key={formula.id}>
+          <div className="flex flex-col lg:flex-row gap-4 items-start">
+
+            {/* Tabla — flex-1 para ocupar el espacio disponible */}
+            <div className="flex-1 min-w-0">
+              <DataTable
+                columns={columns}
+                data={formula.items}
+                title={formula.name}
+                precioTotal={formula.precioTotal}
+                onEdit={() => setFormulaEditar(formula)}
+              />
+            </div>
+
+            {/* Gráfico de torta — ancho fijo */}
+            <div className="w-full lg:w-64 border rounded-lg shadow-sm p-3 shrink-0">
+              <p className="text-xs font-medium text-center text-muted-foreground uppercase tracking-wide mb-1">
+                Composición del costo
+              </p>
+              <FormulaPieChart formula={formula} />
+            </div>
+
+          </div>
         </div>
       ))}
 
@@ -87,7 +99,6 @@ export function FormulasClient({
         onSaved={handleSaved}
       />
 
-      {/* FAB — aparece al scrollear más de 300px */}
       {mostrarFab && (
         <button
           onClick={scrollAlInicio}
