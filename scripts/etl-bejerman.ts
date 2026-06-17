@@ -16,10 +16,10 @@ const adapter = new PrismaMariaDb({
 const prisma = new PrismaClient({ adapter });
 
 const sqlConfig: pkg.config = {
-  server: "192.168.1.230",
-  database: "SBDACANE",
-  user: "sa",
-  password: "Sa.2012",
+  server: process.env.BEJERMAN_SERVER!,
+  database: process.env.BEJERMAN_DB!,
+  user: process.env.BEJERMAN_USER!,
+  password: process.env.BEJERMAN_PASSWORD!,
   options: {
     encrypt: false,
     trustServerCertificate: true,
