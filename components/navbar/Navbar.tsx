@@ -23,6 +23,7 @@ export const Navbar = () => {
           <Link href="/insumos" className="mr-5 hover:text-gray-900">Insumos</Link>
           <Link href="/formulas" className="mr-5 hover:text-gray-900">Fórmulas</Link>
           <Link href="/estadisticas" className="mr-5 hover:text-gray-900">Estadísticas</Link>
+          <Link href="/bejerman" className="mr-5 hover:text-gray-900">Estadísticas Bejerman</Link>
           <Link href="/informes" className="mr-5 hover:text-gray-900">Informes</Link>
           {session?.user?.role === "ADMIN" && (
             <Link href="/admin/usuarios" className="mr-5 hover:text-gray-900">

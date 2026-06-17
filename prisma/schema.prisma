@@ -132,3 +132,146 @@ model HistorialPrecioFormula {
   @@index([formulaId])
   @@index([createdAt])
 }
+
+// ─── Bejerman: Artículos ──────────────────────────────────────────────────────
+
+model BejArticulo {
+  codigo        String   @id // art_CodGen
+  descripcion   String   @db.VarChar(50)
+  clasificacion String?  @db.VarChar(1) // A/B/C
+  esProducido   Boolean  @default(false) // art_CircProd
+  esVendido     Boolean  @default(false) // art_CircVta
+  esComprado    Boolean  @default(false) // art_CircCpra
+  updatedAt     DateTime
+
+  ventasDetalle  BejVentaDet[]
+  comprasDetalle BejCompraDet[]
+  listaPrecios   BejListaPrecio[]
+
+  @@map("bej_articulos")
+}
+
+// ─── Bejerman: Ventas ─────────────────────────────────────────────────────────
+
+model BejVentaCab {
+  id           Int      @id // cve_ID
+  fecha        DateTime
+  codCliente   String   @db.VarChar(6)
+  razonSocial  String   @db.VarChar(40)
+  importeTotal Decimal  @db.Decimal(15, 2)
+  anulado      Boolean  @default(false)
+
+  detalle BejVentaDet[]
+
+  @@index([fecha])
+  @@index([codCliente])
+  @@map("bej_ventas_cab")
+}
+
+model BejVentaDet {
+  id          Int         @id @default(autoincrement())
+  ventaId     Int
+  venta       BejVentaCab @relation(fields: [ventaId], references: [id])
+  artCodigo   String      @db.VarChar(20)
+  articulo    BejArticulo @relation(fields: [artCodigo], references: [codigo])
+  descripcion String      @db.VarChar(50)
+  cantidad    Decimal     @db.Decimal(15, 4)
+  neto        Decimal     @db.Decimal(15, 2)
+  precioCosto Decimal     @db.Decimal(15, 2)
+  fecha       DateTime
+
+  @@index([artCodigo])
+  @@index([ventaId])
+  @@index([fecha])
+  @@map("bej_ventas_det")
+}
+
+// ─── Bejerman: Compras ────────────────────────────────────────────────────────
+
+model BejCompraCab {
+  id           Int      @id
+  fecha        DateTime
+  codProveedor String   @db.VarChar(6)
+  razonSocial  String   @db.VarChar(40)
+  importeTotal Decimal  @db.Decimal(15, 2)
+  anulado      Boolean  @default(false)
+
+  detalle BejCompraDet[]
+
+  @@index([fecha])
+  @@map("bej_compras_cab")
+}
+
+model BejCompraDet {
+  id         Int          @id @default(autoincrement())
+  compraId   Int
+  compra     BejCompraCab @relation(fields: [compraId], references: [id])
+  artCodigo  String       @db.VarChar(20)
+  articulo   BejArticulo  @relation(fields: [artCodigo], references: [codigo])
+  cantidad   Decimal      @db.Decimal(15, 4)
+  neto       Decimal      @db.Decimal(15, 2)
+  precioUnit Decimal      @db.Decimal(15, 2)
+  fecha      DateTime
+
+  @@index([artCodigo])
+  @@index([fecha])
+  @@map("bej_compras_det")
+}
+
+// ─── Bejerman: Lista de Precios ───────────────────────────────────────────────
+
+model BejListaPrecio {
+  id        Int         @id @default(autoincrement())
+  listaCod  String      @db.VarChar(3)
+  artCodigo String      @db.VarChar(20)
+  articulo  BejArticulo @relation(fields: [artCodigo], references: [codigo])
+  precio    Decimal     @db.Decimal(15, 2)
+  fechaMod  DateTime
+
+  @@unique([listaCod, artCodigo])
+  @@index([artCodigo])
+  @@map("bej_lista_precios")
+}
+
+// ─── Bejerman: Producción ─────────────────────────────────────────────────────
+
+model BejProdFormula {
+  formula    String    @id @db.VarChar(32)
+  batch      Decimal   @db.Decimal(15, 4)
+  costoTotal Decimal   @db.Decimal(15, 2)
+  costoComp  Decimal   @db.Decimal(15, 2)
+  costoRrhh  Decimal   @db.Decimal(15, 2)
+  costoMaq   Decimal   @db.Decimal(15, 2)
+  costoInd   Decimal   @db.Decimal(15, 2)
+  fechaCosto DateTime?
+  vigente    Boolean   @default(true)
+
+  componentes BejProdFormulaComp[]
+
+  @@map("bej_prod_formulas")
+}
+
+model BejProdFormulaComp {
+  id          Int            @id @default(autoincrement())
+  formula     String         @db.VarChar(32)
+  prodFormula BejProdFormula @relation(fields: [formula], references: [formula])
+  componente  String         @db.VarChar(41)
+  cantidad    Decimal        @db.Decimal(15, 4)
+
+  @@index([formula])
+  @@map("bej_prod_formula_comp")
+}
+
+// ─── Metadata del ETL ─────────────────────────────────────────────────────────
+
+model BejEtlLog {
+  id        Int      @id @default(autoincrement())
+  tabla     String   @db.VarChar(50)
+  registros Int
+  durMs     Int
+  estado    String   @db.VarChar(10) // "ok" | "error"
+  error     String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@map("bej_etl_log")
+}
