@@ -31,7 +31,7 @@ async function explorarColumnas(pool: pkg.ConnectionPool, tabla: string) {
     const tipo = c.CHARACTER_MAXIMUM_LENGTH
       ? `${c.DATA_TYPE}(${c.CHARACTER_MAXIMUM_LENGTH})`
       : c.DATA_TYPE;
-    console.log(`     ${c.COLUMN_NAME.padEnd(35)} ${tipo}`);
+    // console.log(`     ${c.COLUMN_NAME.padEnd(35)} ${tipo}`);
   });
 }
 
@@ -71,98 +71,35 @@ async function explorarEsquema() {
     for (const tabla of tablasObjetivo) {
       await explorarColumnas(pool, tabla);
     }
-
-    //También ver una muestra de datos de Articulos
-    console.log("\n\n🔎 Muestra de Articulos (5 registros):");
-    const muestra = await pool.request().query(`SELECT TOP 5 * FROM Articulos`);
-    console.log(JSON.stringify(muestra.recordset, null, 2));
     if (pool) {
-      const listas = await pool.request().query(`
-        SELECT DISTINCT lprdlp_Cod AS lista, COUNT(*) AS articulos
-        FROM ListaPrec
-        GROUP BY lprdlp_Cod
-        ORDER BY lprdlp_Cod
-      `);
-      console.log('\n💲 Listas de precios:');
-      listas.recordset.forEach((l: any) => {
-        console.log(`  Lista ${l.lista}: ${l.articulos} artículos`);
-      });
-      //     const muestra = await pool.request().query(`
-      //   SELECT TOP 20
-      //     i.iveart_CodGen                     AS codigo,
-      //     a.art_DescGen                       AS descripcion,
-      //     AVG(i.ive_PrCosto)                  AS costoPromedio,
-      //     MAX(i.ive_PrCosto)                  AS costoMax,
-      //     MIN(i.ive_PrCosto)                  AS costoMin,
-      //     COUNT(*)                            AS vecesVendido,
-      //     MAX(i.ivecve_FEmision)              AS ultimaVenta,
-      //     lp.lpr_Precio                       AS precioSIV
-      //   FROM ItemVta i
-      //   INNER JOIN Articulos a ON a.art_CodGen = i.iveart_CodGen
-      //   LEFT JOIN ListaPrec lp 
-      //     ON lp.lprart_CodGen = i.iveart_CodGen 
-      //     AND lp.lprdlp_Cod = 'SIV'
-      //   WHERE i.ive_tipoIt = 'A'
-      //     AND i.ive_PrCosto > 0
-      //     AND i.ivecve_FEmision >= DATEADD(month, -3, GETDATE())
-      //   GROUP BY i.iveart_CodGen, a.art_DescGen, lp.lpr_Precio
-      //   ORDER BY COUNT(*) DESC
-      // `);
-      //     console.log('\n🔎 Muestra costo vs precio (últimos 3 meses):');
-      //     muestra.recordset.forEach((r: any) => {
-      //       const margen = r.precioSIV > 0
-      //         ? (((r.precioSIV - r.costoPromedio) / r.precioSIV) * 100).toFixed(1)
-      //         : 'N/A';
-      //       console.log(
-      //         `  ${r.descripcion?.trim().padEnd(40)} ` +
-      //         `Costo: ${r.costoPromedio?.toFixed(2).padStart(10)} ` +
-      //         `(min:${r.costoMin?.toFixed(2)} max:${r.costoMax?.toFixed(2)}) ` +
-      //         `| SIV: ${r.precioSIV?.toFixed(2).padStart(10)} ` +
-      //         `| Margen: ${margen}% ` +
-      //         `| Ventas: ${r.vecesVendido}`
-      //       );
-      //     });
-      const compras = await pool.request().query(`
-    SELECT TOP 15
-      i.icoart_CodGen                                   AS codigo,
-      a.art_DescGen                                     AS descripcion,
-      AVG(ABS(i.ico_NetoLoc) / NULLIF(i.ico_CantUM1, 0))  AS costoUnitPromedio,
-      MIN(ABS(i.ico_NetoLoc) / NULLIF(i.ico_CantUM1, 0))  AS costoMin,
-      MAX(ABS(i.ico_NetoLoc) / NULLIF(i.ico_CantUM1, 0))  AS costoMax,
-      MAX(c.cco_FEmision)                               AS ultimaCompra,
-      COUNT(*)                                          AS cantCompras,
-      lp.lpr_Precio                                     AS precioSIV
-    FROM ItemComp i
-    INNER JOIN CabCompra c ON c.cco_ID = i.icocco_ID
-    INNER JOIN Articulos a ON a.art_CodGen = i.icoart_CodGen
-    LEFT JOIN ListaPrec lp 
-      ON lp.lprart_CodGen = i.icoart_CodGen 
-      AND lp.lprdlp_Cod = 'SIV'
-    WHERE i.ico_tipoIt = 'A'
-      AND i.ico_CantUM1 > 0
-      AND i.ico_NetoLoc <> 0
-      AND c.cco_FEmision >= DATEADD(month, -3, GETDATE())
-      AND c.cco_Anulado = 0
-    GROUP BY i.icoart_CodGen, a.art_DescGen, lp.lpr_Precio
-    ORDER BY COUNT(*) DESC
+      const detalle = await pool.request().query(`
+    SELECT 
+      'VENTA' AS origen,
+      SUM(ive_CantUM1)   AS unidades,
+      SUM(ive_NetoLoc)   AS importe
+    FROM ItemVta
+    WHERE iveart_CodGen = 'RED0000041'
+      AND ive_tipoIt = 'A'
+      AND ivecve_FEmision >= DATEADD(month, -12, GETDATE())
+    UNION ALL
+    SELECT 
+      'NP' AS origen,
+      SUM(d.sdv_CantUM1)  AS unidades,
+      SUM(d.sdv_ImpTot)   AS importe
+    FROM SegDetV d
+    INNER JOIN SegCabV s ON s.scv_ID = d.sdvscv_ID
+    WHERE d.sdvart_CodGen = 'RED0000041'
+      AND d.sdv_TipoIt = 'A'
+      AND d.sdv_ActStock = '4'
+      AND s.scv_Fact = 0
+      AND s.scv_Estado = 'S'
+      AND s.scv_FEmision >= DATEADD(month, -12, GETDATE())
   `);
-
-      console.log('\n🛒 Costo real desde compras (últimos 3 meses):');
-      compras.recordset.forEach((r: any) => {
-        const margen = r.precioSIV > 0
-          ? (((r.precioSIV - r.costoUnitPromedio) / r.precioSIV) * 100).toFixed(1)
-          : 'N/A';
-        console.log(
-          `  ${r.descripcion?.trim().padEnd(40)} ` +
-          `Costo: ${r.costoUnitPromedio?.toFixed(2).padStart(10)} ` +
-          `| SIV: ${r.precioSIV?.toFixed(2).padStart(10)} ` +
-          `| Margen: ${margen}% ` +
-          `| Compras: ${r.cantCompras} ` +
-          `| Última: ${new Date(r.ultimaCompra).toLocaleDateString()}`
-        );
+      console.log('\n🔎 Detalle RED0000041:');
+      detalle.recordset.forEach((r: any) => {
+        console.log(`  ${r.origen}: ${r.unidades?.toLocaleString()} unidades | $ ${r.importe?.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`);
       });
     }
-
 
   } catch (err) {
     console.error("❌ Error:", err);

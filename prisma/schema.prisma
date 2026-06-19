@@ -147,6 +147,7 @@ model BejArticulo {
   ventasDetalle  BejVentaDet[]
   comprasDetalle BejCompraDet[]
   listaPrecios   BejListaPrecio[]
+  npDetalle      BejNPDet[]
 
   @@map("bej_articulos")
 }
@@ -184,6 +185,39 @@ model BejVentaDet {
   @@index([ventaId])
   @@index([fecha])
   @@map("bej_ventas_det")
+}
+
+// ─── Bejerman: Notas de Pedido ────────────────────────────────────────────────
+
+model BejNPCab {
+  id          Int      @id // scv_ID
+  fecha       DateTime
+  codCliente  String   @db.VarChar(6)
+  razonSocial String   @db.VarChar(40)
+
+  detalle BejNPDet[]
+
+  @@index([fecha])
+  @@index([codCliente])
+  @@map("bej_np_cab")
+}
+
+model BejNPDet {
+  id           Int         @id @default(autoincrement())
+  npId         Int
+  np           BejNPCab    @relation(fields: [npId], references: [id])
+  artCodigo    String      @db.VarChar(20)
+  articulo     BejArticulo @relation(fields: [artCodigo], references: [codigo])
+  descripcion  String      @db.VarChar(50)
+  cantidad     Decimal     @db.Decimal(15, 4)
+  importeTotal Decimal     @db.Decimal(15, 2)
+  precioUn     Decimal     @db.Decimal(15, 2)
+  fecha        DateTime
+
+  @@index([artCodigo])
+  @@index([npId])
+  @@index([fecha])
+  @@map("bej_np_det")
 }
 
 // ─── Bejerman: Compras ────────────────────────────────────────────────────────
@@ -247,6 +281,7 @@ model BejProdFormula {
   vigente    Boolean   @default(true)
 
   componentes BejProdFormulaComp[]
+  producidos  BejProdFormulaProducido[]
 
   @@map("bej_prod_formulas")
 }
@@ -260,6 +295,18 @@ model BejProdFormulaComp {
 
   @@index([formula])
   @@map("bej_prod_formula_comp")
+}
+
+model BejProdFormulaProducido {
+  id          Int            @id @default(autoincrement())
+  formula     String         @db.VarChar(32)
+  prodFormula BejProdFormula @relation(fields: [formula], references: [formula])
+  artCodigo   String         @db.VarChar(20)
+  cantidad    Decimal        @db.Decimal(15, 4)
+
+  @@index([formula])
+  @@index([artCodigo])
+  @@map("bej_prod_formula_producidos")
 }
 
 // ─── Metadata del ETL ─────────────────────────────────────────────────────────

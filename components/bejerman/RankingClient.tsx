@@ -20,29 +20,35 @@ const formatPeso = (n: number) =>
 const formatNum = (n: number) =>
   new Intl.NumberFormat('es-AR', { maximumFractionDigits: 0 }).format(n);
 
-type Orden   = 'facturacion' | 'unidades' | 'margen'
+type Orden = 'facturacion' | 'unidades' | 'margen'
 type Periodo = 'mes' | 'trimestre' | 'semestre' | 'anio'
 
 export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
-  const [data, setData]           = useState(inicial);
-  const [orden, setOrden]         = useState<Orden>('facturacion');
-  const [periodo, setPeriodo]     = useState<Periodo>('anio');
-  const [sorting, setSorting]     = useState<SortingState>([]);
+  const [data, setData] = useState(inicial);
+  const [orden, setOrden] = useState<Orden>('facturacion');
+  const [periodo, setPeriodo] = useState<Periodo>('anio');
+  const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
-  const [isPending, startTransition]    = useTransition();
+  const [isPending, startTransition] = useTransition();
+  const [filtroTipo, setFiltroTipo] = useState<'todos' | 'produccion' | 'compra' | 'sincosto'>('todos');
 
   function actualizar(nuevoOrden: Orden, nuevoPeriodo: Periodo) {
     setOrden(nuevoOrden);
     setPeriodo(nuevoPeriodo);
     startTransition(async () => {
       const result = await getRankingArticulosAction({
-        orden:   nuevoOrden,
-        limite:  50,
+        orden: nuevoOrden,
         periodo: nuevoPeriodo,
       });
       setData(result);
     });
   }
+
+  const datosFiltrados = useMemo(() => {
+    if (filtroTipo === 'todos') return data;
+    if (filtroTipo === 'sincosto') return data.filter(r => r.fuenteCosto === null);
+    return data.filter(r => r.fuenteCosto === filtroTipo);
+  }, [data, filtroTipo]);
 
   const columns = useMemo<ColumnDef<RankingArticulo>[]>(() => [
     {
@@ -67,14 +73,14 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
       accessorKey: 'unidadesVendidas',
       header: 'Unidades',
       cell: ({ getValue }) => (
-        <span className="text-right block">{formatNum(getValue() as number)}</span>
+        <span className="s">{formatNum(getValue() as number)}</span>
       ),
     },
     {
       accessorKey: 'facturacionNeta',
       header: 'Facturación',
       cell: ({ getValue }) => (
-        <span className="text-right block font-medium">{formatPeso(getValue() as number)}</span>
+        <span className="s font-medium">{formatPeso(getValue() as number)}</span>
       ),
     },
     {
@@ -82,7 +88,7 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
       header: 'Precio SIV',
       cell: ({ getValue }) => {
         const v = getValue() as number | null;
-        return <span className="text-right block">{v ? formatPeso(v) : <span className="text-gray-300">—</span>}</span>;
+        return <span className="s">{v ? formatPeso(v) : <span className="text-gray-300">—</span>}</span>;
       },
     },
     {
@@ -90,7 +96,7 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
       header: 'Costo unit.',
       cell: ({ getValue }) => {
         const v = getValue() as number | null;
-        return <span className="text-right block">{v ? formatPeso(v) : <span className="text-gray-300">—</span>}</span>;
+        return <span className="s">{v ? formatPeso(v) : <span className="text-gray-300">—</span>}</span>;
       },
     },
     {
@@ -100,9 +106,8 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
         const v = getValue() as number | null;
         if (v === null) return <span className="text-gray-300 block text-right">—</span>;
         return (
-          <span className={`block text-right font-medium ${
-            v < 20 ? 'text-red-500' : v < 35 ? 'text-yellow-500' : 'text-green-600'
-          }`}>
+          <span className={`font-medium ${v < 20 ? 'text-red-500' : v < 35 ? 'text-yellow-500' : 'text-green-600'
+            }`}>
             {v.toFixed(1)}%
           </span>
         );
@@ -124,17 +129,34 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
   ], []);
 
   const table = useReactTable({
-    data,
+    data: datosFiltrados,
     columns,
-    state:    { sorting, globalFilter },
-    onSortingChange:      setSorting,
+    state: { sorting, globalFilter },
+    onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
-    getCoreRowModel:       getCoreRowModel(),
-    getSortedRowModel:     getSortedRowModel(),
-    getFilteredRowModel:   getFilteredRowModel(),
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     initialState: { pagination: { pageSize: 25 } },
   });
+  // Calcular totales sobre datosFiltrados
+  const totales = useMemo(() => {
+    const conCosto = datosFiltrados.filter(r => r.margenPct !== null);
+    const facturacionTotal = datosFiltrados.reduce((acc, r) => acc + r.facturacionNeta, 0);
+    const costoTotal = conCosto.reduce((acc, r) => acc + (r.costoUnitario ?? 0) * r.unidadesVendidas, 0);
+    const margenPonderado = facturacionTotal > 0
+      ? ((facturacionTotal - costoTotal) / facturacionTotal) * 100
+      : null;
+
+    return {
+      facturacionTotal,
+      margenPonderado,
+      totalArticulos: datosFiltrados.length,
+      articulosConCosto: conCosto.length,
+      sinCosto: datosFiltrados.length - conCosto.length,
+    };
+  }, [datosFiltrados]);
 
   return (
     <div>
@@ -146,9 +168,8 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
             <button
               key={o}
               onClick={() => actualizar(o, periodo)}
-              className={`px-3 py-1 rounded text-sm ${
-                orden === o ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'
-              }`}
+              className={`px-3 py-1 rounded text-sm ${orden === o ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'
+                }`}
             >
               {o === 'facturacion' ? 'Facturación' : o === 'unidades' ? 'Unidades' : 'Menor margen'}
             </button>
@@ -160,13 +181,56 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
             <button
               key={p}
               onClick={() => actualizar(orden, p)}
-              className={`px-3 py-1 rounded text-sm ${
-                periodo === p ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'
-              }`}
+              className={`px-3 py-1 rounded text-sm ${periodo === p ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'
+                }`}
             >
               {p === 'mes' ? '1 mes' : p === 'trimestre' ? '3 meses' : p === 'semestre' ? '6 meses' : '1 año'}
             </button>
           ))}
+        </div>
+      </div>
+      <div className="flex gap-2 items-center mb-4">
+        <span className="text-sm font-medium">Tipo:</span>
+        {([
+          { value: 'todos', label: 'Todos' },
+          { value: 'produccion', label: '⚙️ Elaborados' },
+          { value: 'compra', label: '🛒 Comprados' },
+          { value: 'sincosto', label: '— Sin costo' },
+        ] as { value: typeof filtroTipo, label: string }[]).map(({ value, label }) => (
+          <button
+            key={value}
+            onClick={() => setFiltroTipo(value)}
+            className={`px-3 py-1 rounded text-sm ${filtroTipo === value ? 'bg-blue-600 text-white' : 'bg-gray-100 hover:bg-gray-200'
+              }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {/* Resumen */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 mt-2">
+        <div className="bg-gray-50 rounded-lg p-4">
+          <div className="text-xs text-gray-400 mb-1">Facturación total</div>
+          <div className="text-lg font-bold">{formatPeso(totales.facturacionTotal)}</div>
+        </div>
+        <div className="bg-gray-50 rounded-lg p-4">
+          <div className="text-xs text-gray-400 mb-1">Margen promedio ponderado</div>
+          <div className={`text-lg font-bold ${totales.margenPonderado === null ? 'text-gray-300' :
+              totales.margenPonderado < 20 ? 'text-red-500' :
+                totales.margenPonderado < 35 ? 'text-yellow-500' : 'text-green-600'
+            }`}>
+            {totales.margenPonderado !== null ? `${totales.margenPonderado.toFixed(1)}%` : '—'}
+          </div>
+        </div>
+        <div className="bg-gray-50 rounded-lg p-4">
+          <div className="text-xs text-gray-400 mb-1">Artículos mostrados</div>
+          <div className="text-lg font-bold">{totales.totalArticulos}</div>
+        </div>
+        <div className="bg-gray-50 rounded-lg p-4">
+          <div className="text-xs text-gray-400 mb-1">Sin costo asignado</div>
+          <div className={`text-lg font-bold ${totales.sinCosto > 0 ? 'text-yellow-500' : 'text-green-600'}`}>
+            {totales.sinCosto}
+          </div>
         </div>
       </div>
 
@@ -189,13 +253,15 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
                 {headerGroup.headers.map(header => (
                   <th
                     key={header.id}
-                    className="pb-2 pr-4 select-none"
+                    className={`pb-2 pr-4 select-none ${['unidadesVendidas', 'facturacionNeta', 'precioSIV', 'costoUnitario', 'margenPct', 'fuenteCosto']
+                      .includes(header.column.id) ? 'text-right' : ''
+                      }`}
                     onClick={header.column.getToggleSortingHandler()}
                     style={{ cursor: header.column.getCanSort() ? 'pointer' : 'default' }}
                   >
                     <div className="flex items-center gap-1">
                       {flexRender(header.column.columnDef.header, header.getContext())}
-                      {header.column.getIsSorted() === 'asc'  && ' ↑'}
+                      {header.column.getIsSorted() === 'asc' && ' ↑'}
                       {header.column.getIsSorted() === 'desc' && ' ↓'}
                     </div>
                   </th>

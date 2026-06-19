@@ -5,7 +5,6 @@ import { RankingClient } from "@/components/bejerman/RankingClient";
 export default async function BejermanPage() {
   const data = await getRankingArticulosAction({
     orden:   'facturacion',
-    limite:  50,
     periodo: 'anio',
   });
 

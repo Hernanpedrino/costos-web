@@ -113,17 +113,18 @@ async function etlVentas(pool: pkg.ConnectionPool, desdeFecha: Date) {
     const cabResult = await pool.request()
       .input('desde', desdeFecha)
       .query(`
-        SELECT
-          cve_ID          AS id,
-          cve_FEmision    AS fecha,
-          cve_CodCli      AS codCliente,
-          cvecli_RazSoc   AS razonSocial,
-          cve_ImpMonLoc   AS importeTotal,
-          cve_Anulado     AS anulado
-        FROM CabVenta
-        WHERE cve_FEmision >= @desde
-          AND cve_Anulado = 0
-      `);
+    SELECT
+      cve_ID          AS id,
+      cve_FEmision    AS fecha,
+      cve_CodCli      AS codCliente,
+      cvecli_RazSoc   AS razonSocial,
+      cve_ImpMonLoc   AS importeTotal,
+      cve_Anulado     AS anulado
+    FROM CabVenta
+    WHERE cve_FEmision >= @desde
+      AND cve_Anulado = 0
+      AND cvetco_Cod NOT IN ('RC', 'NC6', 'CG', 'CIB', 'CR', 'CRO')
+  `);
 
     const cabeceras = cabResult.recordset;
     console.log(`  Cabeceras: ${cabeceras.length}`);
@@ -275,6 +276,29 @@ async function etlFormulas(pool: pkg.ConnectionPool) {
         cantidad: row.cantidad ?? 0,
       }))
     });
+    // Producidos — qué artículo genera cada fórmula
+    const prodResult = await pool.request().query(`
+  SELECT 
+    formula,
+    sbart_CodGen  AS artCodigo,
+    cantidadUM1   AS cantidad
+  FROM ProdFrm_Producidos
+  WHERE sbart_CodGen IS NOT NULL
+    AND sbart_CodGen <> ''
+`);
+
+    await prisma.bejProdFormulaProducido.deleteMany();
+    await prisma.bejProdFormulaProducido.createMany({
+      data: prodResult.recordset
+        .filter((r: any) => r.artCodigo?.trim())
+        .map((r: any) => ({
+          formula: r.formula,
+          artCodigo: r.artCodigo.trim(),
+          cantidad: r.cantidad ?? 1,
+        }))
+    });
+
+    console.log(`  ✅ ... ${prodResult.recordset.length} producidos sincronizados`);
 
     await logETL('formulas', formulas.length, Date.now() - inicio, 'ok');
     console.log(`  ✅ ${formulas.length} fórmulas, ${compResult.recordset.length} componentes sincronizados`);
@@ -421,6 +445,105 @@ async function etlCompras(pool: pkg.ConnectionPool, desdeFecha: Date) {
     throw err;
   }
 }
+async function etlNotasPedido(pool: pkg.ConnectionPool, desdeFecha: Date) {
+  const inicio = Date.now();
+  console.log(`\n📝 Sincronizando Notas de Pedido desde ${desdeFecha.toLocaleDateString()}...`);
+  try {
+    const cabResult = await pool.request()
+      .input('desde', desdeFecha)
+      .query(`
+        SELECT
+          scv_ID        AS id,
+          scv_FEmision  AS fecha,
+          scvcli_Cod    AS codCliente,
+          scvcli_RazSoc AS razonSocial
+        FROM SegCabV
+        WHERE scv_FEmision >= @desde
+          AND scv_ActStock = 1
+          AND scv_Fact = 0
+          AND scv_Estado = 'S'
+      `);
+
+    const cabeceras = cabResult.recordset;
+    console.log(`  Cabeceras: ${cabeceras.length}`);
+
+    if (cabeceras.length === 0) {
+      console.log('  Sin notas de pedido nuevas.');
+      await logETL('notas_pedido', 0, Date.now() - inicio, 'ok');
+      return;
+    }
+
+    await procesarEnLotes(cabeceras, 100, async (lote) => {
+      await Promise.all(lote.map(row =>
+        prisma.bejNPCab.upsert({
+          where: { id: row.id },
+          update: {
+            fecha: row.fecha,
+            codCliente: row.codCliente?.trim() ?? '',
+            razonSocial: row.razonSocial?.trim() ?? '',
+          },
+          create: {
+            id: row.id,
+            fecha: row.fecha,
+            codCliente: row.codCliente?.trim() ?? '',
+            razonSocial: row.razonSocial?.trim() ?? '',
+          }
+        })
+      ));
+    });
+
+    const ids = cabeceras.map(c => c.id);
+    let totalDet = 0;
+
+    for (let i = 0; i < ids.length; i += 1000) {
+      const loteIds = ids.slice(i, i + 1000);
+      const detResult = await pool.request().query(`
+        SELECT
+          d.sdvscv_ID     AS npId,
+          d.sdvart_CodGen AS artCodigo,
+          d.sdv_Desc      AS descripcion,
+          d.sdv_CantUM1   AS cantidad,
+          d.sdv_ImpTot    AS importeTotal,
+          d.sdv_PrecioUn  AS precioUn,
+          s.scv_FEmision  AS fecha
+        FROM SegDetV d
+        INNER JOIN SegCabV s ON s.scv_ID = d.sdvscv_ID
+        WHERE d.sdvscv_ID IN (${loteIds.join(',')})
+          AND d.sdv_TipoIt = 'A'
+          AND d.sdv_CantUM1 > 0
+          AND d.sdv_ActStock = '4'
+      `);
+
+      const detalles = detResult.recordset.filter(d => d.artCodigo?.trim());
+      const npIdsLote = [...new Set(detalles.map(d => d.npId))];
+
+      if (npIdsLote.length > 0) {
+        await prisma.bejNPDet.deleteMany({
+          where: { npId: { in: npIdsLote } }
+        });
+        await prisma.bejNPDet.createMany({
+          data: detalles.map(row => ({
+            npId: row.npId,
+            artCodigo: row.artCodigo.trim(),
+            descripcion: row.descripcion?.trim() ?? '',
+            cantidad: row.cantidad ?? 0,
+            importeTotal: row.importeTotal ?? 0,
+            precioUn: row.precioUn ?? 0,
+            fecha: row.fecha,
+          })),
+          skipDuplicates: true,
+        });
+        totalDet += detalles.length;
+      }
+    }
+
+    await logETL('notas_pedido', cabeceras.length, Date.now() - inicio, 'ok');
+    console.log(`  ✅ ${cabeceras.length} cabeceras, ${totalDet} ítems sincronizados`);
+  } catch (err: any) {
+    await logETL('notas_pedido', 0, Date.now() - inicio, 'error', err.message);
+    throw err;
+  }
+}
 
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -456,7 +579,8 @@ async function main() {
 
     await etlArticulos(pool);
     await etlVentas(pool, desdeFecha);
-    await etlCompras(pool, desdeFecha);  // ← nueva línea
+    await etlNotasPedido(pool, desdeFecha);
+    await etlCompras(pool, desdeFecha);
     await etlFormulas(pool);
     await etlListaPrecios(pool);
 

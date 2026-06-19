@@ -4,57 +4,88 @@
 import { prisma } from "@/lib/prisma"
 
 export interface RankingArticulo {
-  codigo:          string
-  descripcion:     string
-  clasificacion:   string | null
-  esProducido:     boolean
+  codigo: string
+  descripcion: string
+  clasificacion: string | null
+  esProducido: boolean
   unidadesVendidas: number
   facturacionNeta: number
-  costoUnitario:   number | null
-  fuenteCosto:     'compra' | 'produccion' | null
-  margenPct:       number | null
-  precioSIV:       number | null
+  costoUnitario: number | null
+  fuenteCosto: 'compra' | 'produccion' | null
+  margenPct: number | null
+  precioSIV: number | null
 }
 
 export async function getRankingArticulosAction(params: {
-  orden:   'facturacion' | 'unidades' | 'margen'
-  limite:  number
+  orden: 'facturacion' | 'unidades' | 'margen'
   periodo: 'mes' | 'trimestre' | 'semestre' | 'anio'
 }): Promise<RankingArticulo[]> {
 
   const diasPeriodo = {
-    mes:       30,
+    mes: 30,
     trimestre: 90,
-    semestre:  180,
-    anio:      365,
+    semestre: 180,
+    anio: 365,
   }[params.periodo];
 
   const desdeFecha = new Date();
   desdeFecha.setDate(desdeFecha.getDate() - diasPeriodo);
 
-  // 1. Ventas agrupadas por artículo en el período
-  const ventas = await prisma.bejVentaDet.groupBy({
-    by:    ['artCodigo'],
-    where: { fecha: { gte: desdeFecha } },
-    _sum:  { cantidad: true, neto: true },
-    orderBy: params.orden === 'unidades'
-      ? { _sum: { cantidad: 'desc' } }
-      : { _sum: { neto: 'desc' } },
-    take: params.orden === 'margen' ? 500 : params.limite,
+  // 1. Ventas + Notas de Pedido agrupadas por artículo
+  const [ventas, notasPedido] = await Promise.all([
+    prisma.bejVentaDet.groupBy({
+      by: ['artCodigo'],
+      where: { fecha: { gte: desdeFecha } },
+      _sum: { cantidad: true, neto: true },
+    }),
+    prisma.bejNPDet.groupBy({
+      by: ['artCodigo'],
+      where: { fecha: { gte: desdeFecha } },
+      _sum: { cantidad: true, importeTotal: true },
+    }),
+  ]);
+  // Combinar ventas y NP por artículo
+  const ventasMap = new Map(ventas.map(v => [v.artCodigo, {
+    cantidad: Number(v._sum.cantidad ?? 0),
+    neto: Number(v._sum.neto ?? 0),
+  }]));
+
+  notasPedido.forEach(np => {
+    const existing = ventasMap.get(np.artCodigo);
+    if (existing) {
+      existing.cantidad += Number(np._sum.cantidad ?? 0);
+      existing.neto += Number(np._sum.importeTotal ?? 0);
+    } else {
+      ventasMap.set(np.artCodigo, {
+        cantidad: Number(np._sum.cantidad ?? 0),
+        neto: Number(np._sum.importeTotal ?? 0),
+      });
+    }
   });
 
-  if (ventas.length === 0) return [];
+  // Convertir el mapa a array y ordenar
+  const ventasCombinadas = [...ventasMap.entries()].map(([artCodigo, datos]) => ({
+    artCodigo,
+    cantidad: datos.cantidad,
+    neto: datos.neto,
+  }));
 
-  const codigos = ventas.map(v => v.artCodigo);
+  const ordenadas = ventasCombinadas.sort((a, b) =>
+    params.orden === 'unidades'
+      ? b.cantidad - a.cantidad
+      : b.neto - a.neto
+  );
+
+  const codigos = ordenadas.map(v => v.artCodigo);
 
   // 2. Info de artículos
   const articulos = await prisma.bejArticulo.findMany({
     where: { codigo: { in: codigos } },
     select: {
-      codigo:       true,
-      descripcion:  true,
+      codigo: true,
+      descripcion: true,
       clasificacion: true,
-      esProducido:  true,
+      esProducido: true,
     }
   });
   const artMap = new Map(articulos.map(a => [a.codigo, a]));
@@ -71,10 +102,10 @@ export async function getRankingArticulosAction(params: {
   desdeCosto.setDate(desdeCosto.getDate() - 90);
 
   const costoCompras = await prisma.bejCompraDet.groupBy({
-    by:    ['artCodigo'],
+    by: ['artCodigo'],
     where: {
       artCodigo: { in: codigos },
-      fecha:     { gte: desdeCosto },
+      fecha: { gte: desdeCosto },
       precioUnit: { gt: 0 }
     },
     _avg: { precioUnit: true },
@@ -83,40 +114,37 @@ export async function getRankingArticulosAction(params: {
     costoCompras.map(c => [c.artCodigo, Number(c._avg.precioUnit)])
   );
 
-  // 5. Costo desde producción
-  const costosProd = await prisma.bejProdFormulaComp.findMany({
-    where: { componente: { in: codigos } },
-    select: { componente: true, formula: true }
+  // 5. Costo desde producción — usando ProdFrm_Producidos como nexo
+  const producidos = await prisma.bejProdFormulaProducido.findMany({
+    where: { artCodigo: { in: codigos } },
+    select: { artCodigo: true, formula: true, cantidad: true }
   });
 
-  const formulasCodigos = [...new Set(costosProd.map(c => c.formula))];
+  const formulasCodigos = [...new Set(producidos.map(p => p.formula))];
   const formulas = await prisma.bejProdFormula.findMany({
     where: { formula: { in: formulasCodigos } },
     select: { formula: true, costoTotal: true, batch: true }
   });
-
-  // Artículos producidos: buscar en ProdFrm_Producidos qué artículo produce cada fórmula
-  const producidos = await prisma.bejProdFormulaComp.findMany({
-    where: { formula: { in: formulasCodigos } },
-    select: { formula: true, componente: true }
-  });
+  const formulaMap = new Map(formulas.map(f => [f.formula, f]));
 
   const costoProdMap = new Map<string, number>();
-  formulas.forEach(f => {
+  producidos.forEach(p => {
+    const f = formulaMap.get(p.formula);
+    if (!f) return;
     const batch = Number(f.batch) || 1;
-    const costoUnit = Number(f.costoTotal) / batch;
-    // Asociar a los artículos que produce esta fórmula
-    producidos
-      .filter(p => p.formula === f.formula)
-      .forEach(p => costoProdMap.set(p.componente, costoUnit));
+    const cantidad = Number(p.cantidad) || 1;
+    const costoUnit = (Number(f.costoTotal) / batch) * cantidad;
+    if (!costoProdMap.has(p.artCodigo) || costoUnit < costoProdMap.get(p.artCodigo)!) {
+      costoProdMap.set(p.artCodigo, costoUnit);
+    }
   });
 
   // 6. Armar resultado
-  const resultado: RankingArticulo[] = ventas.map(v => {
-    const art          = artMap.get(v.artCodigo);
-    const facturacion  = Number(v._sum.neto ?? 0);
-    const unidades     = Number(v._sum.cantidad ?? 0);
-    const precioSIV    = precioMap.get(v.artCodigo) ?? null;
+  const resultado: RankingArticulo[] = ordenadas.map((v, i) => {
+    const art = artMap.get(v.artCodigo);
+    const facturacion = v.neto;
+    const unidades = v.cantidad;
+    const precioSIV = precioMap.get(v.artCodigo) ?? null;
 
     // Determinar costo: primero compras, luego producción
     let costoUnitario: number | null = null;
@@ -124,10 +152,10 @@ export async function getRankingArticulosAction(params: {
 
     if (costoCompraMap.has(v.artCodigo)) {
       costoUnitario = costoCompraMap.get(v.artCodigo)!;
-      fuenteCosto   = 'compra';
+      fuenteCosto = 'compra';
     } else if (costoProdMap.has(v.artCodigo)) {
       costoUnitario = costoProdMap.get(v.artCodigo)!;
-      fuenteCosto   = 'produccion';
+      fuenteCosto = 'produccion';
     }
 
     // Margen sobre precio SIV
@@ -136,12 +164,12 @@ export async function getRankingArticulosAction(params: {
       : null;
 
     return {
-      codigo:           v.artCodigo,
-      descripcion:      art?.descripcion?.trim() ?? v.artCodigo,
-      clasificacion:    art?.clasificacion ?? null,
-      esProducido:      art?.esProducido ?? false,
+      codigo: v.artCodigo,
+      descripcion: art?.descripcion?.trim() ?? v.artCodigo,
+      clasificacion: art?.clasificacion ?? null,
+      esProducido: art?.esProducido ?? false,
       unidadesVendidas: unidades,
-      facturacionNeta:  facturacion,
+      facturacionNeta: facturacion,
       costoUnitario,
       fuenteCosto,
       margenPct,
@@ -153,8 +181,7 @@ export async function getRankingArticulosAction(params: {
   if (params.orden === 'margen') {
     return resultado
       .filter(r => r.margenPct !== null)
-      .sort((a, b) => (a.margenPct ?? 0) - (b.margenPct ?? 0))
-      .slice(0, params.limite);
+      .sort((a, b) => (a.margenPct ?? 0) - (b.margenPct ?? 0));
   }
 
   return resultado;
