@@ -26,6 +26,17 @@ const sqlConfig: pkg.config = {
   },
   port: 1433
 };
+const liliConfig: pkg.config = {
+  server:   process.env.LILI_SERVER!,
+  database: process.env.LILI_DATABASE!,
+  user:     process.env.LILI_USER!,
+  password: process.env.LILI_PASSWORD!,
+  options: {
+    encrypt: false,
+    trustServerCertificate: true,
+  },
+  port: 1433
+};
 // ─── Helper: log de ETL ───────────────────────────────────────────────────────
 
 async function logETL(tabla: string, registros: number, durMs: number, estado: 'ok' | 'error', error?: string) {

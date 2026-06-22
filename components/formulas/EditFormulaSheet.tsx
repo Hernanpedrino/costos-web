@@ -38,6 +38,7 @@ import type { Insumo, Formula } from "@/types"
 // Solo cantidad e ingrediente — sin precio (se gestiona desde insumos)
 
 const formSchema = z.object({
+  codigoBejerman: z.string().optional(),
   items: z.array(
     z.object({
       ingredienteId: z.string().min(1, "Seleccioná un ingrediente"),
@@ -57,11 +58,11 @@ type FormValues = z.infer<typeof formSchema>
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface EditFormulaSheetProps {
-  formula:      FormulaListItem | null
+  formula: FormulaListItem | null
   listaInsumos: Insumo[]
   listaFormulas: Pick<Formula, "id" | "name">[]
-  onClose:      () => void
-  onSaved:      () => void
+  onClose: () => void
+  onSaved: () => void
 }
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
@@ -69,7 +70,7 @@ interface EditFormulaSheetProps {
 function parsearIngredienteId(ingredienteId: string) {
   const [tipo, id] = ingredienteId.split(":")
   return {
-    insumoId:     tipo === "insumo"  ? id : undefined,
+    insumoId: tipo === "insumo" ? id : undefined,
     subFormulaId: tipo === "formula" ? id : undefined,
   }
 }
@@ -99,6 +100,7 @@ export function EditFormulaSheet({
   useEffect(() => {
     if (formula) {
       form.reset({
+        codigoBejerman: formula.codigoBejerman ?? "",
         items: formula.items.map((item) => ({
           // Reconstruimos el ingredienteId con prefijo
           ingredienteId: item.insumoId
@@ -116,7 +118,8 @@ export function EditFormulaSheet({
     setFeedback(null)
 
     const result = await updateFormulaAction(formula.id, {
-      name:  formula.name,   // el nombre no cambia acá
+      name: formula.name,
+      codigoBejerman: data.codigoBejerman || undefined,
       items: data.items.map((item) => ({
         cantidad: item.cantidad,
         ...parsearIngredienteId(item.ingredienteId),
@@ -144,6 +147,24 @@ export function EditFormulaSheet({
         </SheetHeader>
 
         <form onSubmit={form.handleSubmit(onSubmit)} className="m-6 space-y-4">
+
+          <Controller
+            name="codigoBejerman"
+            control={form.control}
+            render={({ field }) => (
+              <Field>
+                <FieldLabel>
+                  Código Bejerman <span className="text-gray-400 text-xs">(opcional)</span>
+                </FieldLabel>
+                <Input
+                  {...field}
+                  value={field.value ?? ""}
+                  placeholder="ESP1000003"
+                  autoComplete="off"
+                />
+              </Field>
+            )}
+          />
 
           {/* Lista de ingredientes */}
           <div className="flex flex-col gap-4">

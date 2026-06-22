@@ -76,16 +76,19 @@ model HistorialPrecioInsumo {
 // ─── Insumos ──────────────────────────────────────────────────────────────────
 
 model Insumo {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  suplier   String
-  price     Decimal  @db.Decimal(10, 2)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(uuid())
+  name           String   @unique
+  suplier        String
+  price          Decimal  @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  codigoBejerman String?  @db.VarChar(20)
 
   usadoEn           FormulaDetalle[]
   historialPrecios  HistorialPrecioInsumo[]
   historialFormulas HistorialPrecioFormula[]
+
+  @@index([codigoBejerman])
 }
 
 // ─── Fórmulas ─────────────────────────────────────────────────────────────────
@@ -99,6 +102,9 @@ model Formula {
   items            FormulaDetalle[]
   comoIngrediente  FormulaDetalle[]         @relation("SubFormula")
   historialPrecios HistorialPrecioFormula[]
+  codigoBejerman   String?                  @db.VarChar(20)
+
+  @@index([codigoBejerman])
 }
 
 model FormulaDetalle {
@@ -321,4 +327,81 @@ model BejEtlLog {
   createdAt DateTime @default(now())
 
   @@map("bej_etl_log")
+}
+
+model BejArticuloMapeo {
+  id         Int     @id @default(autoincrement())
+  codigoLili String  @db.VarChar(20)
+  codigoCane String  @db.VarChar(20)
+  verificado Boolean @default(false) // true = revisado manualmente
+
+  @@unique([codigoLili])
+  @@index([codigoCane])
+  @@map("bej_articulo_mapeo")
+}
+
+// ─── LILI: Artículos ──────────────────────────────────────────────────────────
+
+model LiliArticulo {
+  codigo        String   @id
+  descripcion   String   @db.VarChar(50)
+  clasificacion String?  @db.VarChar(1)
+  esProducido   Boolean  @default(false)
+  esVendido     Boolean  @default(false)
+  esComprado    Boolean  @default(false)
+  updatedAt     DateTime
+
+  ventasDetalle LiliVentaDet[]
+  listaPrecios  LiliListaPrecio[]
+
+  @@map("lili_articulos")
+}
+
+// ─── LILI: Ventas ─────────────────────────────────────────────────────────────
+
+model LiliVentaCab {
+  id           Int      @id
+  fecha        DateTime
+  codCliente   String   @db.VarChar(6)
+  razonSocial  String   @db.VarChar(40)
+  importeTotal Decimal  @db.Decimal(15, 2)
+  tipoComp     String   @db.VarChar(5)
+
+  detalle LiliVentaDet[]
+
+  @@index([fecha])
+  @@index([codCliente])
+  @@map("lili_ventas_cab")
+}
+
+model LiliVentaDet {
+  id          Int          @id @default(autoincrement())
+  ventaId     Int
+  venta       LiliVentaCab @relation(fields: [ventaId], references: [id])
+  artCodigo   String       @db.VarChar(20)
+  articulo    LiliArticulo @relation(fields: [artCodigo], references: [codigo])
+  descripcion String       @db.VarChar(50)
+  cantidad    Decimal      @db.Decimal(15, 4)
+  neto        Decimal      @db.Decimal(15, 2)
+  fecha       DateTime
+
+  @@index([artCodigo])
+  @@index([ventaId])
+  @@index([fecha])
+  @@map("lili_ventas_det")
+}
+
+// ─── LILI: Lista de Precios ───────────────────────────────────────────────────
+
+model LiliListaPrecio {
+  id        Int          @id @default(autoincrement())
+  listaCod  String       @db.VarChar(3)
+  artCodigo String       @db.VarChar(20)
+  articulo  LiliArticulo @relation(fields: [artCodigo], references: [codigo])
+  precio    Decimal      @db.Decimal(15, 2)
+  fechaMod  DateTime
+
+  @@unique([listaCod, artCodigo])
+  @@index([artCodigo])
+  @@map("lili_lista_precios")
 }

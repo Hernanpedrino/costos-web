@@ -36,6 +36,7 @@ import type { Insumo, Formula } from "@/types"
 
 const formSchema = z.object({
   name: z.string().min(5, "El nombre debe tener al menos 5 caracteres"),
+  codigoBejerman: z.string().optional(),
   items: z.array(
     z.object({
       ingredienteId: z.string().min(1, "Seleccioná un ingrediente"),
@@ -53,14 +54,14 @@ const formSchema = z.object({
 type FormValues = z.infer<typeof formSchema>
 
 interface NewFormulaFormProps {
-  listaInsumos:  Insumo[]
+  listaInsumos: Insumo[]
   listaFormulas: Pick<Formula, "id" | "name">[]
 }
 
 function parsearIngredienteId(ingredienteId: string) {
   const [tipo, id] = ingredienteId.split(":")
   return {
-    insumoId:     tipo === "insumo"  ? id : undefined,
+    insumoId: tipo === "insumo" ? id : undefined,
     subFormulaId: tipo === "formula" ? id : undefined,
   }
 }
@@ -73,7 +74,7 @@ export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormPr
   } | null>(null)
 
   // Ordenar A-Z al recibir las listas
-  const insumosOrdenados  = [...listaInsumos].sort((a, b) => a.name.localeCompare(b.name))
+  const insumosOrdenados = [...listaInsumos].sort((a, b) => a.name.localeCompare(b.name))
   const formulasOrdenadas = [...listaFormulas].sort((a, b) => a.name.localeCompare(b.name))
 
   const form = useForm<FormValues>({
@@ -101,7 +102,8 @@ export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormPr
     setFeedback(null)
 
     const result = await createFormulaAction({
-      name:  data.name,
+      name: data.name,
+      codigoBejerman: data.codigoBejerman || undefined,  // ← agregar
       items: data.items.map((item) => ({
         cantidad: item.cantidad,
         ...parsearIngredienteId(item.ingredienteId),
@@ -145,6 +147,24 @@ export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormPr
                       autoComplete="off"
                     />
                     {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+                  </Field>
+                )}
+              />
+              <Controller
+                name="codigoBejerman"
+                control={form.control}
+                render={({ field }) => (
+                  <Field>
+                    <FieldLabel htmlFor="formula-codigo-bej">
+                      Código Bejerman <span className="text-gray-400 text-xs">(opcional)</span>
+                    </FieldLabel>
+                    <Input
+                      {...field}
+                      value={field.value ?? ""}
+                      id="formula-codigo-bej"
+                      placeholder="ESP1000003"
+                      autoComplete="off"
+                    />
                   </Field>
                 )}
               />
@@ -240,11 +260,10 @@ export const NewFormulaForm = ({ listaInsumos, listaFormulas }: NewFormulaFormPr
           </form>
 
           {feedback && (
-            <p className={`mt-4 text-sm px-3 py-2 rounded-md ${
-              feedback.type === "success"
-                ? "bg-green-50 text-green-800 border border-green-200"
-                : "bg-red-50 text-red-700 border border-red-200"
-            }`}>
+            <p className={`mt-4 text-sm px-3 py-2 rounded-md ${feedback.type === "success"
+              ? "bg-green-50 text-green-800 border border-green-200"
+              : "bg-red-50 text-red-700 border border-red-200"
+              }`}>
               {feedback.message}
             </p>
           )}

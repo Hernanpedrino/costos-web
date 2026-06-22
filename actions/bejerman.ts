@@ -3,6 +3,25 @@
 
 import { prisma } from "@/lib/prisma"
 
+export interface DetalleArticuloMes {
+  mes: string   // "2025-01"
+  unidades: number
+  facturacion: number
+  costoUnit: number | null
+  margenPct: number | null
+}
+
+export interface DetalleArticulo {
+  codigo: string
+  descripcion: string
+  clasificacion: string | null
+  esProducido: boolean
+  precioSIV: number | null
+  costoUnit: number | null
+  fuenteCosto: 'compra' | 'produccion' | null
+  evolucion: DetalleArticuloMes[]
+}
+
 export interface RankingArticulo {
   codigo: string
   descripcion: string
@@ -31,8 +50,8 @@ export async function getRankingArticulosAction(params: {
   const desdeFecha = new Date();
   desdeFecha.setDate(desdeFecha.getDate() - diasPeriodo);
 
-  // 1. Ventas + Notas de Pedido agrupadas por artículo
-  const [ventas, notasPedido] = await Promise.all([
+  // 1. Ventas CANE + LILI agrupadas por artículo
+  const [ventasCane, notasPedido, ventasLili, mapeos] = await Promise.all([
     prisma.bejVentaDet.groupBy({
       by: ['artCodigo'],
       where: { fecha: { gte: desdeFecha } },
@@ -43,13 +62,32 @@ export async function getRankingArticulosAction(params: {
       where: { fecha: { gte: desdeFecha } },
       _sum: { cantidad: true, importeTotal: true },
     }),
+    prisma.liliVentaDet.groupBy({
+      by: ['artCodigo'],
+      where: { fecha: { gte: desdeFecha } },
+      _sum: { cantidad: true, neto: true },
+    }),
+    prisma.bejArticuloMapeo.findMany({
+      where: { verificado: true },
+      select: { codigoLili: true, codigoCane: true }
+    }),
   ]);
-  // Combinar ventas y NP por artículo
-  const ventasMap = new Map(ventas.map(v => [v.artCodigo, {
-    cantidad: Number(v._sum.cantidad ?? 0),
-    neto: Number(v._sum.neto ?? 0),
-  }]));
 
+  // Mapa lili → cane
+  const liliACane = new Map(mapeos.map(m => [m.codigoLili, m.codigoCane]));
+
+  // Combinar todo bajo códigos CANE
+  const ventasMap = new Map<string, { cantidad: number; neto: number }>();
+
+  // Ventas CANE
+  ventasCane.forEach(v => {
+    ventasMap.set(v.artCodigo, {
+      cantidad: Number(v._sum.cantidad ?? 0),
+      neto: Number(v._sum.neto ?? 0),
+    });
+  });
+
+  // NP CANE
   notasPedido.forEach(np => {
     const existing = ventasMap.get(np.artCodigo);
     if (existing) {
@@ -63,18 +101,30 @@ export async function getRankingArticulosAction(params: {
     }
   });
 
-  // Convertir el mapa a array y ordenar
-  const ventasCombinadas = [...ventasMap.entries()].map(([artCodigo, datos]) => ({
-    artCodigo,
-    cantidad: datos.cantidad,
-    neto: datos.neto,
-  }));
+  // Ventas LILI — traducir código LILI → CANE
+  ventasLili.forEach(v => {
+    const codigoCane = liliACane.get(v.artCodigo);
+    if (!codigoCane) return; // sin mapeo → descartar
+    const existing = ventasMap.get(codigoCane);
+    if (existing) {
+      existing.cantidad += Number(v._sum.cantidad ?? 0);
+      existing.neto += Number(v._sum.neto ?? 0);
+    } else {
+      ventasMap.set(codigoCane, {
+        cantidad: Number(v._sum.cantidad ?? 0),
+        neto: Number(v._sum.neto ?? 0),
+      });
+    }
+  });
 
-  const ordenadas = ventasCombinadas.sort((a, b) =>
-    params.orden === 'unidades'
-      ? b.cantidad - a.cantidad
-      : b.neto - a.neto
-  );
+  // Ordenar y extraer códigos
+  const ordenadas = [...ventasMap.entries()]
+    .map(([artCodigo, datos]) => ({ artCodigo, ...datos }))
+    .sort((a, b) =>
+      params.orden === 'unidades'
+        ? b.cantidad - a.cantidad
+        : b.neto - a.neto
+    );
 
   const codigos = ordenadas.map(v => v.artCodigo);
 
@@ -185,4 +235,116 @@ export async function getRankingArticulosAction(params: {
   }
 
   return resultado;
+}
+export async function getDetalleArticuloAction(codigo: string): Promise<DetalleArticulo | null> {
+  // Info base del artículo
+  const articulo = await prisma.bejArticulo.findUnique({
+    where: { codigo },
+    select: { codigo: true, descripcion: true, clasificacion: true, esProducido: true }
+  });
+  if (!articulo) return null;
+
+  // Precio SIV
+  const precioSIV = await prisma.bejListaPrecio.findFirst({
+    where: { artCodigo: codigo, listaCod: 'SIV' },
+    select: { precio: true }
+  });
+
+  // Ventas CANE por mes (últimos 12 meses)
+  const desdeFecha = new Date();
+  desdeFecha.setMonth(desdeFecha.getMonth() - 12);
+
+  const ventasCane = await prisma.bejVentaDet.findMany({
+    where: { artCodigo: codigo, fecha: { gte: desdeFecha } },
+    select: { cantidad: true, neto: true, fecha: true }
+  });
+
+  const npCane = await prisma.bejNPDet.findMany({
+    where: { artCodigo: codigo, fecha: { gte: desdeFecha } },
+    select: { cantidad: true, importeTotal: true, fecha: true }
+  });
+
+  // Ventas LILI por mes — buscar mapeo
+  const mapeo = await prisma.bejArticuloMapeo.findFirst({
+    where: { codigoCane: codigo, verificado: true },
+    select: { codigoLili: true }
+  });
+
+  const ventasLili = mapeo ? await prisma.liliVentaDet.findMany({
+    where: { artCodigo: mapeo.codigoLili, fecha: { gte: desdeFecha } },
+    select: { cantidad: true, neto: true, fecha: true }
+  }) : [];
+
+  // Agrupar todo por mes
+  const mesMap = new Map<string, { unidades: number; neto: number }>();
+
+  const agregarAlMes = (fecha: Date, cantidad: number, neto: number) => {
+    const mes = `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`;
+    const existing = mesMap.get(mes);
+    if (existing) {
+      existing.unidades += cantidad;
+      existing.neto += neto;
+    } else {
+      mesMap.set(mes, { unidades: cantidad, neto });
+    }
+  };
+
+  ventasCane.forEach(v => agregarAlMes(v.fecha, Number(v.cantidad), Number(v.neto)));
+  npCane.forEach(v => agregarAlMes(v.fecha, Number(v.cantidad), Number(v.importeTotal)));
+  ventasLili.forEach(v => agregarAlMes(v.fecha, Number(v.cantidad), Number(v.neto)));
+
+  // Costo unitario
+  const desdeCosto = new Date();
+  desdeCosto.setDate(desdeCosto.getDate() - 90);
+
+  let costoUnit: number | null = null;
+  let fuenteCosto: 'compra' | 'produccion' | null = null;
+
+  const costoCompra = await prisma.bejCompraDet.aggregate({
+    where: { artCodigo: codigo, fecha: { gte: desdeCosto }, precioUnit: { gt: 0 } },
+    _avg: { precioUnit: true }
+  });
+
+  if (costoCompra._avg.precioUnit) {
+    costoUnit = Number(costoCompra._avg.precioUnit);
+    fuenteCosto = 'compra';
+  } else {
+    const producido = await prisma.bejProdFormulaProducido.findFirst({
+      where: { artCodigo: codigo },
+      include: { prodFormula: true }
+    });
+    if (producido) {
+      const batch = Number(producido.prodFormula.batch) || 1;
+      costoUnit = Number(producido.prodFormula.costoTotal) / batch;
+      fuenteCosto = 'produccion';
+    }
+  }
+
+  // Armar evolución ordenada por mes
+  const evolucion: DetalleArticuloMes[] = [...mesMap.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([mes, datos]) => {
+      const precioRef = Number(precioSIV?.precio ?? 0);
+      const margenPct = precioRef > 0 && costoUnit
+        ? ((precioRef - costoUnit) / precioRef) * 100
+        : null;
+      return {
+        mes,
+        unidades: datos.unidades,
+        facturacion: datos.neto,
+        costoUnit,
+        margenPct,
+      };
+    });
+
+  return {
+    codigo: articulo.codigo,
+    descripcion: articulo.descripcion,
+    clasificacion: articulo.clasificacion,
+    esProducido: articulo.esProducido,
+    precioSIV: precioSIV ? Number(precioSIV.precio) : null,
+    costoUnit,
+    fuenteCosto,
+    evolucion,
+  };
 }

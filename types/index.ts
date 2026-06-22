@@ -58,6 +58,7 @@ export type FormulaRaw = Prisma.FormulaGetPayload<Record<string, never>>;
 export interface Formula {
   id: UUID;
   name: string;
+  codigoBejerman: string | null
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }
@@ -253,6 +254,7 @@ export interface CreateFormulaDetalleDTO {
 
 export interface CreateFormulaDTO {
   name: string;
+  codigoBejerman?: string;
   items: CreateFormulaDetalleDTO[];
 }
 
@@ -318,9 +320,10 @@ export function serializarInsumo(raw: InsumoRaw): Insumo {
 
 export function serializarFormula(raw: FormulaRaw): Formula {
   return {
-    id: raw.id,
-    name: raw.name,
-    createdAt: raw.createdAt.toISOString(),
-    updatedAt: raw.updatedAt.toISOString(),
+    id:             raw.id,
+    name:           raw.name,
+    codigoBejerman: raw.codigoBejerman ?? null,
+    createdAt:      raw.createdAt.toISOString(),
+    updatedAt:      raw.updatedAt.toISOString(),
   };
 }

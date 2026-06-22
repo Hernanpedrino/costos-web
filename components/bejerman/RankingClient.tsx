@@ -13,6 +13,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table"
 import { getRankingArticulosAction, type RankingArticulo } from "@/actions/bejerman"
+import { useRouter } from "next/navigation"
 
 const formatPeso = (n: number) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n);
@@ -31,7 +32,8 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
   const [globalFilter, setGlobalFilter] = useState('');
   const [isPending, startTransition] = useTransition();
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'produccion' | 'compra' | 'sincosto'>('todos');
-
+  const router = useRouter();
+  
   function actualizar(nuevoOrden: Orden, nuevoPeriodo: Periodo) {
     setOrden(nuevoOrden);
     setPeriodo(nuevoPeriodo);
@@ -216,8 +218,8 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
         <div className="bg-gray-50 rounded-lg p-4">
           <div className="text-xs text-gray-400 mb-1">Margen promedio ponderado</div>
           <div className={`text-lg font-bold ${totales.margenPonderado === null ? 'text-gray-300' :
-              totales.margenPonderado < 20 ? 'text-red-500' :
-                totales.margenPonderado < 35 ? 'text-yellow-500' : 'text-green-600'
+            totales.margenPonderado < 20 ? 'text-red-500' :
+              totales.margenPonderado < 35 ? 'text-yellow-500' : 'text-green-600'
             }`}>
             {totales.margenPonderado !== null ? `${totales.margenPonderado.toFixed(1)}%` : '—'}
           </div>
@@ -271,7 +273,11 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
           </thead>
           <tbody>
             {table.getRowModel().rows.map(row => (
-              <tr key={row.id} className="border-b hover:bg-gray-50">
+              <tr
+                key={row.id}
+                className="border-b hover:bg-gray-50 cursor-pointer"
+                onClick={() => router.push(`/bejerman/${row.original.codigo}`)}
+              >
                 {row.getVisibleCells().map(cell => (
                   <td key={cell.id} className="py-2 pr-4">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}

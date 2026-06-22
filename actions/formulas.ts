@@ -15,6 +15,7 @@ type ActionResult<T> =
 export interface FormulaListItem {
   id: string;
   name: string;
+  codigoBejerman: string | null;
   createdAt: ISODateString;
   items: {
     id: string;
@@ -126,6 +127,7 @@ export async function getFormulasAction(): Promise<FormulaListItem[]> {
     return {
       id: formula.id,
       name: formula.name,
+      codigoBejerman: formula.codigoBejerman ?? null,
       createdAt: formula.createdAt.toISOString(),
       items: items.map(({ _subtotal: _, ...rest }) => rest),
       precioTotal,
@@ -157,6 +159,7 @@ export async function createFormulaAction(
     const raw = await prisma.formula.create({
       data: {
         name: data.name,
+        codigoBejerman: data.codigoBejerman ?? null,  // ← agregar
         items: {
           create: data.items.map((item) => ({
             cantidad: new Prisma.Decimal(item.cantidad),
@@ -244,6 +247,7 @@ export async function updateFormulaAction(
       where: { id },
       data: {
         name: data.name,
+        codigoBejerman: data.codigoBejerman ?? null,  // ← agregar
         items: {
           deleteMany: {},
           create: data.items.map((item) => ({
@@ -254,7 +258,6 @@ export async function updateFormulaAction(
         },
       },
     });
-
     await registrarAccion({
       usuarioId,
       accion: "EDITAR",
