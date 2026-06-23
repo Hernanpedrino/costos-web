@@ -435,3 +435,39 @@ model LiliCompraDet {
   @@index([fecha])
   @@map("lili_compras_det")
 }
+
+// ─── Costos Operativos ────────────────────────────────────────────────────────
+
+enum TipoCosto {
+  FIJO
+  VARIABLE
+}
+
+model CostoCategoria {
+  id          String    @id @default(uuid())
+  nombre      String    @unique @db.VarChar(50)
+  tipo        TipoCosto
+  descripcion String?   @db.VarChar(255)
+  orden       Int       @default(0) // para ordenar en UI
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  registros CostoRegistro[]
+
+  @@map("costo_categoria")
+}
+
+model CostoRegistro {
+  id          String         @id @default(uuid())
+  categoriaId String
+  categoria   CostoCategoria @relation(fields: [categoriaId], references: [id])
+  periodo     String         @db.VarChar(7) // "2025-06"
+  importe     Decimal        @db.Decimal(15, 2)
+  nota        String?        @db.VarChar(255)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([categoriaId, periodo])
+  @@index([periodo])
+  @@map("costo_registro")
+}
