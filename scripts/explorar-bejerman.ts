@@ -31,7 +31,6 @@ async function explorarColumnas(pool: pkg.ConnectionPool, tabla: string) {
     const tipo = c.CHARACTER_MAXIMUM_LENGTH
       ? `${c.DATA_TYPE}(${c.CHARACTER_MAXIMUM_LENGTH})`
       : c.DATA_TYPE;
-    // console.log(`     ${c.COLUMN_NAME.padEnd(35)} ${tipo}`);
   });
 }
 
@@ -72,35 +71,28 @@ async function explorarEsquema() {
       await explorarColumnas(pool, tabla);
     }
     if (pool) {
-      const detalle = await pool.request().query(`
-    SELECT 
-      'VENTA' AS origen,
-      SUM(ive_CantUM1)   AS unidades,
-      SUM(ive_NetoLoc)   AS importe
-    FROM ItemVta
-    WHERE iveart_CodGen = 'RED0000041'
-      AND ive_tipoIt = 'A'
-      AND ivecve_FEmision >= DATEADD(month, -12, GETDATE())
-    UNION ALL
-    SELECT 
-      'NP' AS origen,
-      SUM(d.sdv_CantUM1)  AS unidades,
-      SUM(d.sdv_ImpTot)   AS importe
-    FROM SegDetV d
-    INNER JOIN SegCabV s ON s.scv_ID = d.sdvscv_ID
-    WHERE d.sdvart_CodGen = 'RED0000041'
-      AND d.sdv_TipoIt = 'A'
-      AND d.sdv_ActStock = '4'
-      AND s.scv_Fact = 0
-      AND s.scv_Estado = 'S'
-      AND s.scv_FEmision >= DATEADD(month, -12, GETDATE())
+      const comp = await pool.request().query(`
+    SELECT
+      f.formula,
+      f.batch,
+      c.componente,
+      c.cantidadUM1  AS cantidad,
+      c.sbart_CodGen AS codigoArticulo,
+      a.art_DescGen  AS descripcion
+    FROM ProdFormulas f
+    INNER JOIN ProdFrm_Componentes c ON c.formula = f.formula
+    LEFT JOIN Articulos a ON a.art_CodGen = c.sbart_CodGen
+    WHERE f.formula = 'CONDIMENTO PROVENZAL POR 1 KG'
   `);
-      console.log('\n🔎 Detalle RED0000041:');
-      detalle.recordset.forEach((r: any) => {
-        console.log(`  ${r.origen}: ${r.unidades?.toLocaleString()} unidades | $ ${r.importe?.toLocaleString('es-AR', { maximumFractionDigits: 0 })}`);
+      console.log('\n🔎 Componentes de CONDIMENTO PROVENZAL POR 1 KG:');
+      comp.recordset.forEach((r: any) => {
+        console.log(
+          `  ${r.codigoArticulo?.padEnd(15)} ` +
+          `${r.descripcion?.trim().padEnd(40)} ` +
+          `Cant: ${r.cantidad}`
+        );
       });
     }
-
   } catch (err) {
     console.error("❌ Error:", err);
   } finally {

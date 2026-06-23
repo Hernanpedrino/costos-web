@@ -3,9 +3,10 @@
 import {
   BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend
+  ResponsiveContainer, PieChart, Pie, Legend, Cell
 } from "recharts"
 import type { DetalleArticulo } from "@/actions/bejerman"
+const COLORES = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16']
 
 const formatPeso = (n: number) =>
   new Intl.NumberFormat('es-AR', {
@@ -143,6 +144,39 @@ export function DetalleArticuloClient({ detalle }: { detalle: DetalleArticulo })
           </tbody>
         </table>
       </div>
+      {detalle.componentesCosto.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-base font-semibold mb-3">Composición del costo</h2>
+          <ResponsiveContainer width="100%" height={280}>
+            <PieChart>
+              <Pie
+                data={detalle.componentesCosto}
+                dataKey="costo"
+                nameKey="nombre"
+                cx="50%"
+                cy="50%"
+                outerRadius={100}
+                label={(props: any) =>
+                  `${Number(props.porcentaje ?? 0).toFixed(1)}%`
+                }
+              >
+                {detalle.componentesCosto.map((_, i) => (
+                  // eslint-disable-next-line @typescript-eslint/no-deprecated
+                  <Cell key={i} fill={COLORES[i % COLORES.length]} />
+                ))}
+              </Pie>
+              <Tooltip
+                formatter={(v) => [formatPeso(Number(v ?? 0)), 'Costo']}
+              />
+              <Legend
+                formatter={(value) => (
+                  <span className="text-sm">{value}</span>
+                )}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      )}
     </div>
   );
 }

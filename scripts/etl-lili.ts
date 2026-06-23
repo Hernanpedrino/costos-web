@@ -245,6 +245,105 @@ async function etlListaPrecios(pool: pkg.ConnectionPool) {
     throw err;
   }
 }
+async function etlCompras(pool: pkg.ConnectionPool, desdeFecha: Date) {
+  const inicio = Date.now();
+  console.log(`\n🛒 Sincronizando Compras LILI desde ${desdeFecha.toLocaleDateString()}...`);
+  try {
+    const cabResult = await pool.request()
+      .input('desde', desdeFecha)
+      .query(`
+        SELECT
+          cco_ID        AS id,
+          cco_FEmision  AS fecha,
+          cco_CodPro    AS codProveedor,
+          ccopro_RazSoc AS razonSocial,
+          cco_ImpMonLoc AS importeTotal
+        FROM CabCompra
+        WHERE cco_FEmision >= @desde
+          AND cco_Anulado = 0
+          AND cco_ImpMonLoc <> 0
+      `);
+
+    const cabeceras = cabResult.recordset;
+    console.log(`  Cabeceras: ${cabeceras.length}`);
+
+    if (cabeceras.length === 0) {
+      console.log('  Sin compras nuevas.');
+      await logETL('compras', 0, Date.now() - inicio, 'ok');
+      return;
+    }
+
+    await procesarEnLotes(cabeceras, 100, async (lote) => {
+      await Promise.all(lote.map((row: any) =>
+        prisma.liliCompraCab.upsert({
+          where:  { id: row.id },
+          update: {
+            fecha:        row.fecha,
+            codProveedor: row.codProveedor?.trim() ?? '',
+            razonSocial:  row.razonSocial?.trim() ?? '',
+            importeTotal: Math.abs(row.importeTotal ?? 0),
+          },
+          create: {
+            id:           row.id,
+            fecha:        row.fecha,
+            codProveedor: row.codProveedor?.trim() ?? '',
+            razonSocial:  row.razonSocial?.trim() ?? '',
+            importeTotal: Math.abs(row.importeTotal ?? 0),
+          }
+        })
+      ));
+    });
+
+    const ids = cabeceras.map((c: any) => c.id);
+    let totalDet = 0;
+
+    for (let i = 0; i < ids.length; i += 1000) {
+      const loteIds = ids.slice(i, i + 1000);
+      const detResult = await pool.request().query(`
+        SELECT
+          i.icocco_ID     AS compraId,
+          i.icoart_CodGen AS artCodigo,
+          i.ico_CantUM1   AS cantidad,
+          ABS(i.ico_NetoLoc) AS neto,
+          ABS(i.ico_NetoLoc) / NULLIF(i.ico_CantUM1, 0) AS precioUnit,
+          c.cco_FEmision  AS fecha
+        FROM ItemComp i
+        INNER JOIN CabCompra c ON c.cco_ID = i.icocco_ID
+        WHERE i.icocco_ID IN (${loteIds.join(',')})
+          AND i.ico_tipoIt = 'A'
+          AND i.ico_CantUM1 > 0
+          AND i.ico_NetoLoc <> 0
+      `);
+
+      const detalles = detResult.recordset.filter((d: any) => d.artCodigo?.trim());
+      const compraIdsLote = [...new Set(detalles.map((d: any) => d.compraId))];
+
+      if (compraIdsLote.length > 0) {
+        await prisma.liliCompraDet.deleteMany({
+          where: { compraId: { in: compraIdsLote as number[] } }
+        });
+        await prisma.liliCompraDet.createMany({
+          data: detalles.map((row: any) => ({
+            compraId:  row.compraId,
+            artCodigo: row.artCodigo.trim(),
+            cantidad:  row.cantidad ?? 0,
+            neto:      row.neto ?? 0,
+            precioUnit: row.precioUnit ?? 0,
+            fecha:     row.fecha,
+          })),
+          skipDuplicates: true,
+        });
+        totalDet += detalles.length;
+      }
+    }
+
+    await logETL('compras', cabeceras.length, Date.now() - inicio, 'ok');
+    console.log(`  ✅ ${cabeceras.length} cabeceras, ${totalDet} ítems sincronizados`);
+  } catch (err: any) {
+    await logETL('compras', 0, Date.now() - inicio, 'error', err.message);
+    throw err;
+  }
+}
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -275,6 +374,7 @@ async function main() {
 
     await etlArticulos(pool);
     await etlVentas(pool, desdeFecha);
+    await etlCompras(pool, desdeFecha);
     await etlListaPrecios(pool);
 
     console.log('\n✅ ETL LILI completado exitosamente');

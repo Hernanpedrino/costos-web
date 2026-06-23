@@ -353,6 +353,7 @@ model LiliArticulo {
 
   ventasDetalle LiliVentaDet[]
   listaPrecios  LiliListaPrecio[]
+  compraDets    LiliCompraDet[]
 
   @@map("lili_articulos")
 }
@@ -404,4 +405,33 @@ model LiliListaPrecio {
   @@unique([listaCod, artCodigo])
   @@index([artCodigo])
   @@map("lili_lista_precios")
+}
+
+model LiliCompraCab {
+  id           Int      @id
+  fecha        DateTime
+  codProveedor String   @db.VarChar(6)
+  razonSocial  String   @db.VarChar(40)
+  importeTotal Decimal  @db.Decimal(15, 2)
+
+  detalle LiliCompraDet[]
+
+  @@index([fecha])
+  @@map("lili_compras_cab")
+}
+
+model LiliCompraDet {
+  id         Int           @id @default(autoincrement())
+  compraId   Int
+  compra     LiliCompraCab @relation(fields: [compraId], references: [id])
+  artCodigo  String        @db.VarChar(20)
+  articulo   LiliArticulo  @relation(fields: [artCodigo], references: [codigo])
+  cantidad   Decimal       @db.Decimal(15, 4)
+  neto       Decimal       @db.Decimal(15, 2)
+  precioUnit Decimal       @db.Decimal(15, 2)
+  fecha      DateTime
+
+  @@index([artCodigo])
+  @@index([fecha])
+  @@map("lili_compras_det")
 }
