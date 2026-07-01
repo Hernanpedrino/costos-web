@@ -132,21 +132,34 @@ async function construirMapasPrecios(
     }),
   ])
 
-  // Mapa de precios Costos El Chilo
   const precioMap = new Map<string, number>()
+
+  // 1. Fórmulas de Costos El Chilo
   formulasChilo.forEach(f => {
     if (!f.codigoBejerman) return
     precioMap.set(f.codigoBejerman, calcularPrecioFormula(f))
   })
 
-  // Compras CANE
+  // 2. Insumos de Costos El Chilo con codigoBejerman
+  const insumosChilo = await prisma.insumo.findMany({
+    where: { codigoBejerman: { in: todosComponentes } },
+    select: { codigoBejerman: true, price: true }
+  })
+  insumosChilo.forEach(i => {
+    if (!i.codigoBejerman) return
+    if (!precioMap.has(i.codigoBejerman)) {
+      precioMap.set(i.codigoBejerman, i.price.toNumber())
+    }
+  })
+
+  // 3. Compras CANE
   comprasCane.forEach(c => {
     if (!precioMap.has(c.artCodigo) && c._avg.precioUnit) {
       precioMap.set(c.artCodigo, Number(c._avg.precioUnit))
     }
   })
 
-  // Compras LILI para los que todavía no tienen precio
+  // 4. Compras LILI para los que todavía no tienen precio
   const sinPrecio = todosComponentes.filter(c => !precioMap.has(c))
   if (sinPrecio.length > 0 && mapeosLili.length > 0) {
     const codigosLili = mapeosLili
@@ -176,6 +189,7 @@ async function construirMapasPrecios(
 export async function getRankingArticulosAction(params: {
   orden: 'facturacion' | 'unidades' | 'margen'
   periodo: 'mes' | 'trimestre' | 'semestre' | 'anio'
+  aplicarCostosOp?: boolean
 }): Promise<RankingArticulo[]> {
 
   const diasPeriodo = { mes: 30, trimestre: 90, semestre: 180, anio: 365 }[params.periodo]
@@ -263,9 +277,9 @@ export async function getRankingArticulosAction(params: {
   })
   const precioMap = new Map(precios.map(p => [p.artCodigo, Number(p.precio)]))
 
-  // 4. Costo desde compras directas (artículos comprados)
+  // 4. Costo desde compras directas
   const desdeCosto = new Date()
-  desdeCosto.setDate(desdeCosto.getDate() - 90)
+  desdeCosto.setDate(desdeCosto.getDate() - 365)
 
   const costoCompras = await prisma.bejCompraDet.groupBy({
     by: ['artCodigo'],
@@ -308,7 +322,39 @@ export async function getRankingArticulosAction(params: {
     }
   })
 
-  // 6. Armar resultado
+  // 6. Factor de prorrateo costos operativos ← ANTES del map
+  let factorProrrateo = 0
+  if (params.aplicarCostosOp) {
+    // Buscar el último período con datos cargados
+    const ultimoRegistro = await prisma.costoRegistro.findFirst({
+      where: { importe: { gt: 0 } },
+      orderBy: { periodo: 'desc' },
+      select: { periodo: true }
+    })
+
+    if (ultimoRegistro) {
+      const periodoUsar = ultimoRegistro.periodo
+
+      const registros = await prisma.costoRegistro.findMany({
+        where: { periodo: periodoUsar },
+        select: { importe: true }
+      })
+      const totalCostos = registros.reduce((t, r) => t + Number(r.importe), 0)
+
+      const [anio, mes] = periodoUsar.split('-').map(Number)
+      const desde = new Date(anio, mes - 1, 1)
+      const hasta = new Date(anio, mes, 1)
+
+      const ventasMes = await prisma.bejVentaDet.aggregate({
+        where: { fecha: { gte: desde, lt: hasta } },
+        _sum: { neto: true }
+      })
+      const totalFacturacion = Number(ventasMes._sum.neto ?? 0)
+      factorProrrateo = totalFacturacion > 0 ? totalCostos / totalFacturacion : 0
+    }
+  }
+
+  // 7. Armar resultado
   const resultado: RankingArticulo[] = ordenadas.map(v => {
     const art = artMap.get(v.artCodigo)
     const precioSIV = precioMap.get(v.artCodigo) ?? null
@@ -324,8 +370,12 @@ export async function getRankingArticulosAction(params: {
       fuenteCosto = 'produccion'
     }
 
+    // Costo operativo prorrateado sobre precio SIV
+    const costoOp = factorProrrateo > 0 && precioSIV ? precioSIV * factorProrrateo : 0
+    const costoTotal = (costoUnitario ?? 0) + costoOp
+
     const margenPct = precioSIV && costoUnitario
-      ? ((precioSIV - costoUnitario) / precioSIV) * 100
+      ? ((precioSIV - costoTotal) / precioSIV) * 100
       : null
 
     return {
@@ -364,7 +414,7 @@ export async function getDetalleArticuloAction(codigo: string): Promise<DetalleA
   desdeFecha.setMonth(desdeFecha.getMonth() - 12)
 
   const desdeCosto = new Date()
-  desdeCosto.setDate(desdeCosto.getDate() - 90)
+  desdeCosto.setDate(desdeCosto.getDate() - 365)
 
   const [precioSIV, ventasCane, npCane, mapeo, costoCompra] = await Promise.all([
     prisma.bejListaPrecio.findFirst({
@@ -415,6 +465,7 @@ export async function getDetalleArticuloAction(codigo: string): Promise<DetalleA
   let costoUnit: number | null = null
   let fuenteCosto: 'compra' | 'produccion' | null = null
   let componentesCosto: ComponenteCosto[] = []
+
   if (costoCompra._avg.precioUnit) {
     costoUnit = Number(costoCompra._avg.precioUnit)
     fuenteCosto = 'compra'
@@ -444,7 +495,6 @@ export async function getDetalleArticuloAction(codigo: string): Promise<DetalleA
         costoUnit = costoTotal / batch
         fuenteCosto = 'produccion'
 
-        // Buscar descripciones de los componentes
         const artComp = await prisma.bejArticulo.findMany({
           where: { codigo: { in: desglose.map(d => d.componente) } },
           select: { codigo: true, descripcion: true }

@@ -10,6 +10,8 @@ import {
   getCostosPeriodoAction,
   guardarCostoAction,
   crearCategoriaAction,
+  editarCategoriaAction,
+  eliminarCategoriaAction,
   type ResumenPeriodo,
   type EvolucionMes,
   type CategoriaConRegistro,
@@ -18,13 +20,13 @@ import {
 const formatPeso = (n: number) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n)
 
-const COLORES_FIJO     = '#3b82f6'
+const COLORES_FIJO = '#3b82f6'
 const COLORES_VARIABLE = '#f59e0b'
-const COLORES_PIE = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#84cc16','#ec4899','#6366f1','#14b8a6','#a855f7','#f43f5e']
+const COLORES_PIE = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#84cc16', '#ec4899', '#6366f1', '#14b8a6', '#a855f7', '#f43f5e']
 
 function formatPeriodo(p: string) {
   const [anio, mes] = p.split('-')
-  const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+  const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
   return `${meses[parseInt(mes) - 1]} ${anio}`
 }
 
@@ -46,21 +48,22 @@ function periodoActual() {
 }
 
 interface Props {
-  resumenInicial:   ResumenPeriodo
+  resumenInicial: ResumenPeriodo
   evolucionInicial: EvolucionMes[]
 }
 
 export function CostosClient({ resumenInicial, evolucionInicial }: Props) {
-  const [resumen, setResumen]     = useState(resumenInicial)
-  const [evolucion]               = useState(evolucionInicial)
+  const [resumen, setResumen] = useState(resumenInicial)
+  const [evolucion] = useState(evolucionInicial)
   const [isPending, startTransition] = useTransition()
-  const [editando, setEditando]   = useState<string | null>(null)
+  const [editando, setEditando] = useState<string | null>(null)
   const [importeEdit, setImporteEdit] = useState('')
-  const [notaEdit, setNotaEdit]   = useState('')
-  const [feedback, setFeedback]   = useState<{ tipo: 'ok' | 'error'; msg: string } | null>(null)
+  const [notaEdit, setNotaEdit] = useState('')
+  const [feedback, setFeedback] = useState<{ tipo: 'ok' | 'error'; msg: string } | null>(null)
   const [showNuevaCat, setShowNuevaCat] = useState(false)
-  const [nuevaCat, setNuevaCat]   = useState({ nombre: '', tipo: 'FIJO' as 'FIJO' | 'VARIABLE' })
-
+  const [nuevaCat, setNuevaCat] = useState({ nombre: '', tipo: 'FIJO' as 'FIJO' | 'VARIABLE' })
+  const [editandoCat, setEditandoCat] = useState<CategoriaConRegistro | null>(null)
+  const [editCatForm, setEditCatForm] = useState({ nombre: '', tipo: 'FIJO' as 'FIJO' | 'VARIABLE' })
   const hoy = periodoActual()
   const esFuturo = resumen.periodo > hoy
 
@@ -86,7 +89,7 @@ export function CostosClient({ resumenInicial, evolucionInicial }: Props) {
       categoriaId,
       periodo: resumen.periodo,
       importe: importeEdit,
-      nota:    notaEdit || undefined,
+      nota: notaEdit || undefined,
     })
     if (result.success) {
       setFeedback({ tipo: 'ok', msg: 'Guardado correctamente.' })
@@ -110,8 +113,40 @@ export function CostosClient({ resumenInicial, evolucionInicial }: Props) {
       setFeedback({ tipo: 'error', msg: result.error })
     }
   }
+  function iniciarEdicionCat(cat: CategoriaConRegistro) {
+    setEditandoCat(cat)
+    setEditCatForm({ nombre: cat.nombre, tipo: cat.tipo })
+    setFeedback(null)
+  }
 
-  const fijos     = resumen.categorias.filter(c => c.tipo === 'FIJO')
+  async function guardarCategoria() {
+    if (!editandoCat) return
+    const result = await editarCategoriaAction({
+      id: editandoCat.id,
+      nombre: editCatForm.nombre,
+      tipo: editCatForm.tipo,
+    })
+    if (result.success) {
+      setEditandoCat(null)
+      const nuevo = await getCostosPeriodoAction(resumen.periodo)
+      setResumen(nuevo)
+    } else {
+      setFeedback({ tipo: 'error', msg: result.error })
+    }
+  }
+
+  async function eliminarCategoria(cat: CategoriaConRegistro) {
+    if (!confirm(`¿Eliminar la categoría "${cat.nombre}"?`)) return
+    const result = await eliminarCategoriaAction(cat.id)
+    if (result.success) {
+      const nuevo = await getCostosPeriodoAction(resumen.periodo)
+      setResumen(nuevo)
+    } else {
+      setFeedback({ tipo: 'error', msg: result.error })
+    }
+  }
+
+  const fijos = resumen.categorias.filter(c => c.tipo === 'FIJO')
   const variables = resumen.categorias.filter(c => c.tipo === 'VARIABLE')
 
   // Datos para torta
@@ -119,7 +154,7 @@ export function CostosClient({ resumenInicial, evolucionInicial }: Props) {
     resumen.categorias
       .filter(c => (c.importe ?? 0) > 0)
       .map(c => ({ name: c.nombre, value: c.importe ?? 0 }))
-  , [resumen])
+    , [resumen])
 
   return (
     <div>
@@ -168,11 +203,10 @@ export function CostosClient({ resumenInicial, evolucionInicial }: Props) {
       </div>
 
       {feedback && (
-        <div className={`mb-4 px-3 py-2 rounded text-sm ${
-          feedback.tipo === 'ok'
-            ? 'bg-green-50 text-green-800 border border-green-200'
-            : 'bg-red-50 text-red-700 border border-red-200'
-        }`}>
+        <div className={`mb-4 px-3 py-2 rounded text-sm ${feedback.tipo === 'ok'
+          ? 'bg-green-50 text-green-800 border border-green-200'
+          : 'bg-red-50 text-red-700 border border-red-200'
+          }`}>
           {feedback.msg}
         </div>
       )}
@@ -188,7 +222,38 @@ export function CostosClient({ resumenInicial, evolucionInicial }: Props) {
             <tbody>
               {fijos.map(cat => (
                 <tr key={cat.id} className="border-b">
-                  <td className="py-2 pr-4">{cat.nombre}</td>
+                  {/* Columna nombre + edición de categoría */}
+                  <td className="py-2 pr-4">
+                    {editandoCat?.id === cat.id ? (
+                      <div className="flex gap-2">
+                        <input
+                          value={editCatForm.nombre}
+                          onChange={e => setEditCatForm(p => ({ ...p, nombre: e.target.value }))}
+                          className="border rounded px-2 py-1 text-sm flex-1"
+                        />
+                        <select
+                          value={editCatForm.tipo}
+                          onChange={e => setEditCatForm(p => ({ ...p, tipo: e.target.value as 'FIJO' | 'VARIABLE' }))}
+                          className="border rounded px-2 py-1 text-sm"
+                        >
+                          <option value="FIJO">Fijo</option>
+                          <option value="VARIABLE">Variable</option>
+                        </select>
+                        <button onClick={guardarCategoria} className="px-2 py-1 rounded bg-green-700 text-white text-xs">✓</button>
+                        <button onClick={() => setEditandoCat(null)} className="px-2 py-1 rounded bg-gray-100 text-xs">✕</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 group">
+                        <span>{cat.nombre}</span>
+                        <div className="hidden group-hover:flex gap-1">
+                          <button onClick={() => iniciarEdicionCat(cat)} className="text-xs text-blue-500 hover:underline">✏️</button>
+                          <button onClick={() => eliminarCategoria(cat)} className="text-xs text-red-400 hover:underline">🗑️</button>
+                        </div>
+                      </div>
+                    )}
+                  </td>
+
+                  {/* Columna importe */}
                   <td className="py-2 pr-4 text-right">
                     {editando === cat.id ? (
                       <input
@@ -205,27 +270,16 @@ export function CostosClient({ resumenInicial, evolucionInicial }: Props) {
                       </span>
                     )}
                   </td>
+
+                  {/* Columna acciones importe */}
                   <td className="py-2 text-right">
                     {editando === cat.id ? (
                       <div className="flex gap-2 justify-end">
-                        <button
-                          onClick={() => guardar(cat.id)}
-                          className="px-3 py-1 rounded bg-green-700 text-white text-xs"
-                        >
-                          Guardar
-                        </button>
-                        <button
-                          onClick={() => setEditando(null)}
-                          className="px-3 py-1 rounded bg-gray-100 text-xs"
-                        >
-                          Cancelar
-                        </button>
+                        <button onClick={() => guardar(cat.id)} className="px-3 py-1 rounded bg-green-700 text-white text-xs">Guardar</button>
+                        <button onClick={() => setEditando(null)} className="px-3 py-1 rounded bg-gray-100 text-xs">Cancelar</button>
                       </div>
                     ) : (
-                      <button
-                        onClick={() => iniciarEdicion(cat)}
-                        className="text-xs text-blue-600 hover:underline"
-                      >
+                      <button onClick={() => iniciarEdicion(cat)} className="text-xs text-blue-600 hover:underline">
                         {cat.importe ? 'Editar' : 'Cargar'}
                       </button>
                     )}
@@ -243,7 +297,35 @@ export function CostosClient({ resumenInicial, evolucionInicial }: Props) {
             <tbody>
               {variables.map(cat => (
                 <tr key={cat.id} className="border-b">
-                  <td className="py-2 pr-4">{cat.nombre}</td>
+                  <td className="py-2 pr-4">
+                    {editandoCat?.id === cat.id ? (
+                      <div className="flex gap-2">
+                        <input
+                          value={editCatForm.nombre}
+                          onChange={e => setEditCatForm(p => ({ ...p, nombre: e.target.value }))}
+                          className="border rounded px-2 py-1 text-sm flex-1"
+                        />
+                        <select
+                          value={editCatForm.tipo}
+                          onChange={e => setEditCatForm(p => ({ ...p, tipo: e.target.value as 'FIJO' | 'VARIABLE' }))}
+                          className="border rounded px-2 py-1 text-sm"
+                        >
+                          <option value="FIJO">Fijo</option>
+                          <option value="VARIABLE">Variable</option>
+                        </select>
+                        <button onClick={guardarCategoria} className="px-2 py-1 rounded bg-green-700 text-white text-xs">✓</button>
+                        <button onClick={() => setEditandoCat(null)} className="px-2 py-1 rounded bg-gray-100 text-xs">✕</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 group">
+                        <span>{cat.nombre}</span>
+                        <div className="hidden group-hover:flex gap-1">
+                          <button onClick={() => iniciarEdicionCat(cat)} className="text-xs text-blue-500 hover:underline">✏️</button>
+                          <button onClick={() => eliminarCategoria(cat)} className="text-xs text-red-400 hover:underline">🗑️</button>
+                        </div>
+                      </div>
+                    )}
+                  </td>
                   <td className="py-2 pr-4 text-right">
                     {editando === cat.id ? (
                       <input
@@ -263,24 +345,11 @@ export function CostosClient({ resumenInicial, evolucionInicial }: Props) {
                   <td className="py-2 text-right">
                     {editando === cat.id ? (
                       <div className="flex gap-2 justify-end">
-                        <button
-                          onClick={() => guardar(cat.id)}
-                          className="px-3 py-1 rounded bg-green-700 text-white text-xs"
-                        >
-                          Guardar
-                        </button>
-                        <button
-                          onClick={() => setEditando(null)}
-                          className="px-3 py-1 rounded bg-gray-100 text-xs"
-                        >
-                          Cancelar
-                        </button>
+                        <button onClick={() => guardar(cat.id)} className="px-3 py-1 rounded bg-green-700 text-white text-xs">Guardar</button>
+                        <button onClick={() => setEditando(null)} className="px-3 py-1 rounded bg-gray-100 text-xs">Cancelar</button>
                       </div>
                     ) : (
-                      <button
-                        onClick={() => iniciarEdicion(cat)}
-                        className="text-xs text-blue-600 hover:underline"
-                      >
+                      <button onClick={() => iniciarEdicion(cat)} className="text-xs text-blue-600 hover:underline">
                         {cat.importe ? 'Editar' : 'Cargar'}
                       </button>
                     )}
@@ -378,8 +447,8 @@ export function CostosClient({ resumenInicial, evolucionInicial }: Props) {
               labelFormatter={(label) => formatPeriodo(String(label))}
             />
             <Legend />
-            <Bar dataKey="totalFijo"     name="Fijos"     fill={COLORES_FIJO}     stackId="a" radius={[0,0,0,0]} />
-            <Bar dataKey="totalVariable" name="Variables" fill={COLORES_VARIABLE} stackId="a" radius={[4,4,0,0]} />
+            <Bar dataKey="totalFijo" name="Fijos" fill={COLORES_FIJO} stackId="a" radius={[0, 0, 0, 0]} />
+            <Bar dataKey="totalVariable" name="Variables" fill={COLORES_VARIABLE} stackId="a" radius={[4, 4, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

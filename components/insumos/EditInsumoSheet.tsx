@@ -27,11 +27,12 @@ import type { Insumo } from "@/types"
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
 const formSchema = z.object({
-  name:    z.string().min(2, "Mínimo 2 caracteres").max(32, "Máximo 32 caracteres"),
+  name: z.string().min(2, "Mínimo 2 caracteres").max(32, "Máximo 32 caracteres"),
   suplier: z.string().min(3, "Mínimo 3 caracteres").max(32, "Máximo 32 caracteres"),
-  price:   z.number({ message: "Ingresá un número válido" })
+  price: z.number({ message: "Ingresá un número válido" })
     .positive("Debe ser mayor a 0")
     .refine((v) => Math.round(v * 100) / 100 === v, "Máximo 2 decimales"),
+  codigoBejerman: z.string().optional(),
 })
 
 type FormValues = z.infer<typeof formSchema>
@@ -39,9 +40,9 @@ type FormValues = z.infer<typeof formSchema>
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface EditInsumoSheetProps {
-  insumo:   Insumo | null       // null = sheet cerrado
-  onClose:  () => void
-  onSaved:  (insumo: Insumo) => void
+  insumo: Insumo | null       // null = sheet cerrado
+  onClose: () => void
+  onSaved: (insumo: Insumo) => void
 }
 
 // ─── Componente ───────────────────────────────────────────────────────────────
@@ -58,9 +59,10 @@ export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetPro
   useEffect(() => {
     if (insumo) {
       form.reset({
-        name:    insumo.name,
+        name: insumo.name,
         suplier: insumo.suplier,
-        price:   insumo.price,
+        price: insumo.price,
+        codigoBejerman: insumo.codigoBejerman ?? '',
       })
       setFeedback(null)
     }
@@ -71,10 +73,11 @@ export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetPro
     setFeedback(null)
 
     const result = await updateInsumoAction({
-      id:      insumo.id,
-      name:    data.name,
+      id: insumo.id,
+      name: data.name,
       suplier: data.suplier,
-      price:   data.price.toString(),
+      price: data.price.toString(),
+      codigoBejerman: data.codigoBejerman || undefined,
     })
 
     if (result.success) {
@@ -111,6 +114,24 @@ export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetPro
                     aria-invalid={fieldState.invalid}
                   />
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+                </Field>
+              )}
+            />
+            <Controller
+              name="codigoBejerman"
+              control={form.control}
+              render={({ field }) => (
+                <Field>
+                  <FieldLabel htmlFor="edit-codigo-bej">
+                    Código Bejerman <span className="text-gray-400 text-xs">(opcional)</span>
+                  </FieldLabel>
+                  <Input
+                    {...field}
+                    value={field.value ?? ''}
+                    id="edit-codigo-bej"
+                    placeholder="ADI0000015"
+                    autoComplete="off"
+                  />
                 </Field>
               )}
             />

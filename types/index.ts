@@ -48,6 +48,7 @@ export interface Insumo {
   name: string;
   suplier: string;
   price: PriceAsNumber;
+  codigoBejerman: string | null;
   createdAt: ISODateString;
   updatedAt: ISODateString;
 }
@@ -236,6 +237,7 @@ export interface CreateInsumoDTO {
 
 export interface UpdateInsumoDTO extends Partial<CreateInsumoDTO> {
   id: UUID;
+  codigoBejerman?: string;
 }
 
 // — Formula ———————————————————————————
@@ -313,6 +315,7 @@ export function serializarInsumo(raw: InsumoRaw): Insumo {
     name: raw.name,
     suplier: raw.suplier,
     price: raw.price.toNumber(),
+    codigoBejerman: raw.codigoBejerman ?? null,
     createdAt: raw.createdAt.toISOString(),
     updatedAt: raw.updatedAt.toISOString(),
   };

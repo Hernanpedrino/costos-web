@@ -160,6 +160,42 @@ export async function crearCategoriaAction(data: {
     return { success: false, error: 'Error al crear la categoría.' }
   }
 }
+// ─── UPDATE categoría ─────────────────────────────────────────────────────────
+export async function editarCategoriaAction(data: {
+  id:          string
+  nombre:      string
+  tipo:        'FIJO' | 'VARIABLE'
+}): Promise<ActionResult<null>> {
+  try {
+    await prisma.costoCategoria.update({
+      where: { id: data.id },
+      data:  { nombre: data.nombre, tipo: data.tipo }
+    })
+    revalidatePath('/costos')
+    return { success: true, data: null }
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return { success: false, error: 'Ya existe una categoría con ese nombre.' }
+    }
+    return { success: false, error: 'Error al editar la categoría.' }
+  }
+}
+
+// ─── DELETE categoría ─────────────────────────────────────────────────────────
+export async function eliminarCategoriaAction(id: string): Promise<ActionResult<null>> {
+  try {
+    // Verificar si tiene registros cargados
+    const registros = await prisma.costoRegistro.count({ where: { categoriaId: id } })
+    if (registros > 0) {
+      return { success: false, error: `Esta categoría tiene ${registros} registros cargados. Eliminá los registros primero.` }
+    }
+    await prisma.costoCategoria.delete({ where: { id } })
+    revalidatePath('/costos')
+    return { success: true, data: null }
+  } catch (err) {
+    return { success: false, error: 'Error al eliminar la categoría.' }
+  }
+}
 
 // ─── GET: períodos disponibles ────────────────────────────────────────────────
 

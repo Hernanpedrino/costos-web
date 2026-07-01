@@ -32,8 +32,9 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
   const [globalFilter, setGlobalFilter] = useState('');
   const [isPending, startTransition] = useTransition();
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'produccion' | 'compra' | 'sincosto'>('todos');
+  const [aplicarCostosOp, setAplicarCostosOp] = useState(false)
   const router = useRouter();
-  
+
   function actualizar(nuevoOrden: Orden, nuevoPeriodo: Periodo) {
     setOrden(nuevoOrden);
     setPeriodo(nuevoPeriodo);
@@ -41,6 +42,7 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
       const result = await getRankingArticulosAction({
         orden: nuevoOrden,
         periodo: nuevoPeriodo,
+        aplicarCostosOp,
       });
       setData(result);
     });
@@ -209,6 +211,29 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
           </button>
         ))}
       </div>
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium">Costos op.:</span>
+        <button
+          onClick={async () => {
+            const nuevo = !aplicarCostosOp
+            setAplicarCostosOp(nuevo)
+            startTransition(async () => {
+              const result = await getRankingArticulosAction({
+                orden,
+                periodo,
+                aplicarCostosOp: nuevo,
+              })
+              setData(result)
+            })
+          }}
+          className={`px-3 py-1 rounded text-sm ${aplicarCostosOp
+            ? 'bg-green-700 text-white'
+            : 'bg-gray-100 hover:bg-gray-200'
+            }`}
+        >
+          {aplicarCostosOp ? '✅ Incluidos' : 'Excluidos'}
+        </button>
+      </div>
       {/* Resumen */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 mt-2">
         <div className="bg-gray-50 rounded-lg p-4">
@@ -310,6 +335,6 @@ export function RankingClient({ data: inicial }: { data: RankingArticulo[] }) {
           Siguiente →
         </button>
       </div>
-    </div>
+    </div >
   );
 }
