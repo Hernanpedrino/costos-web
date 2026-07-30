@@ -5,27 +5,28 @@ import { prisma } from "@/lib/prisma"
 import { revalidatePath } from "next/cache"
 import { Rol } from "@/generated/prisma"
 import { auth } from "@/auth"
+import { registrarAccion } from "@/lib/registrarAccion"
 import bcrypt from "bcryptjs"
 import * as z from "zod"
 
 // ─── Schema de validación ─────────────────────────────────────────────────────
 
 const createUsuarioSchema = z.object({
-  nombre:   z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
-  email:    z.string().email("Email inválido"),
+  nombre: z.string().min(2, "El nombre debe tener al menos 2 caracteres"),
+  email: z.string().email("Email inválido"),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
 })
 
 type ActionResult<T> =
-  | { success: true;  data: T }
+  | { success: true; data: T }
   | { success: false; error: string }
 
 export interface UsuarioListItem {
-  id:        string
-  nombre:    string
-  email:     string
-  rol:       string
-  activo:    boolean
+  id: string
+  nombre: string
+  email: string
+  rol: string
+  activo: boolean
   createdAt: string
 }
 
@@ -47,11 +48,11 @@ export async function getUsuariosAction(): Promise<UsuarioListItem[]> {
   })
 
   return usuarios.map((u) => ({
-    id:        u.id,
-    nombre:    u.nombre,
-    email:     u.email,
-    rol:       u.rol,
-    activo:    u.activo,
+    id: u.id,
+    nombre: u.nombre,
+    email: u.email,
+    rol: u.rol,
+    activo: u.activo,
     createdAt: u.createdAt.toISOString(),
   }))
 }
@@ -59,8 +60,8 @@ export async function getUsuariosAction(): Promise<UsuarioListItem[]> {
 // ─── CREATE usuario operador ──────────────────────────────────────────────────
 
 export async function createUsuarioAction(data: {
-  nombre:   string
-  email:    string
+  nombre: string
+  email: string
   password: string
 }): Promise<ActionResult<UsuarioListItem>> {
   const esAdmin = await verificarAdmin()
@@ -78,10 +79,10 @@ export async function createUsuarioAction(data: {
 
     const usuario = await prisma.usuario.create({
       data: {
-        nombre:   parsed.data.nombre,
-        email:    parsed.data.email,
+        nombre: parsed.data.nombre,
+        email: parsed.data.email,
         password: passwordHash,
-        rol:      Rol.OPERADOR,  // siempre OPERADOR — ADMIN solo se crea por seed
+        rol: Rol.OPERADOR,  // siempre OPERADOR — ADMIN solo se crea por seed
       },
     })
 
@@ -89,11 +90,11 @@ export async function createUsuarioAction(data: {
     return {
       success: true,
       data: {
-        id:        usuario.id,
-        nombre:    usuario.nombre,
-        email:     usuario.email,
-        rol:       usuario.rol,
-        activo:    usuario.activo,
+        id: usuario.id,
+        nombre: usuario.nombre,
+        email: usuario.email,
+        rol: usuario.rol,
+        activo: usuario.activo,
         createdAt: usuario.createdAt.toISOString(),
       },
     }
@@ -122,7 +123,7 @@ export async function toggleUsuarioActivoAction(
 
     await prisma.usuario.update({
       where: { id },
-      data:  { activo: !usuario.activo },
+      data: { activo: !usuario.activo },
     })
 
     revalidatePath("/admin/usuarios")
@@ -130,5 +131,42 @@ export async function toggleUsuarioActivoAction(
   } catch (error) {
     console.error("[toggleUsuarioActivoAction]", error)
     return { success: false, error: "Error al actualizar el usuario." }
+  }
+}
+// ─── RESET contraseña ─────────────────────────────────────────────────────────
+
+export async function resetPasswordAction(data: {
+  id: string
+  newPassword: string
+}): Promise<ActionResult<null>> {
+  const session = await auth()
+  if (session?.user?.role !== "ADMIN") {
+    return { success: false, error: "No tenés permisos para realizar esta acción." }
+  }
+
+  if (data.newPassword.length < 6) {
+    return { success: false, error: "La contraseña debe tener al menos 6 caracteres." }
+  }
+
+  try {
+    const passwordHash = await bcrypt.hash(data.newPassword, 12)
+    const usuario = await prisma.usuario.update({
+      where: { id: data.id },
+      data: { password: passwordHash }
+    })
+
+    await registrarAccion({
+      usuarioId: session.user.id,
+      accion: "EDITAR",
+      entidad: "Usuario",
+      entidadId: usuario.id,
+      detalle: { accion: "reset_password", email: usuario.email },
+    })
+
+    revalidatePath("/admin/usuarios")
+    return { success: true, data: null }
+  } catch (error) {
+    console.error("[resetPasswordAction]", error)
+    return { success: false, error: "Error al restablecer la contraseña." }
   }
 }

@@ -1,7 +1,5 @@
 // app/(pages)/insumos/page.tsx
 
-import { Separator } from "@/components/ui/separator"
-import { Form } from "@/components/form/Form"
 import { getInsumosAction } from "@/actions/insumos"
 import { InsumosClient } from "@/components/insumos/InsumosClient"
 export const dynamic = 'force-dynamic'

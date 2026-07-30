@@ -1,11 +1,12 @@
 "use client"
 
 import { useState } from "react"
+import { Plus } from "lucide-react"
 import { columns } from "@/app/(pages)/insumos/columns"
 import { DataTable } from "@/app/(pages)/insumos/data-table"
 import { EditInsumoSheet } from "@/components/insumos/EditInsumoSheet"
-import { Form } from "@/components/form/Form"
-import { Separator } from "@/components/ui/separator"
+import { CreateInsumoSheet } from "@/components/insumos/CreateInsumoSheet"
+import { Button } from "@/components/ui/button"
 import type { Insumo } from "@/types"
 
 interface InsumosClientProps {
@@ -15,6 +16,7 @@ interface InsumosClientProps {
 export function InsumosClient({ initialData }: InsumosClientProps) {
   const [data, setData]                 = useState<Insumo[]>(initialData)
   const [insumoEditar, setInsumoEditar] = useState<Insumo | null>(null)
+  const [crearAbierto, setCrearAbierto] = useState(false)
 
   // Edición: reemplaza el item actualizado en el array
   const handleSaved = (actualizado: Insumo) => {
@@ -34,6 +36,16 @@ export function InsumosClient({ initialData }: InsumosClientProps) {
         columns={columns}
         data={data}
         onRowClick={setInsumoEditar}
+        actions={
+          <Button
+            type="button"
+            onClick={() => setCrearAbierto(true)}
+            className="bg-green-800 text-white hover:bg-green-600 shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            Crear insumo
+          </Button>
+        }
       />
 
       <EditInsumoSheet
@@ -42,9 +54,11 @@ export function InsumosClient({ initialData }: InsumosClientProps) {
         onSaved={handleSaved}
       />
 
-      <Separator orientation="horizontal" className="my-10" />
-
-      <Form onCreated={handleCreated} />
+      <CreateInsumoSheet
+        open={crearAbierto}
+        onClose={() => setCrearAbierto(false)}
+        onCreated={handleCreated}
+      />
     </>
   )
 }

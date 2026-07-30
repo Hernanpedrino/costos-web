@@ -1,6 +1,7 @@
 "use client"
 
 import { ColumnDef } from "@tanstack/react-table";
+import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import type { Insumo } from "@/types";
 
 const formatearFecha = (isoString: string) =>
@@ -19,7 +20,21 @@ const formatearPrecio = (amount: number) =>
 export const columns: ColumnDef<Insumo>[] = [
   {
     accessorKey: "name",
-    header: "Producto / Insumo",
+    header: ({ column }) => {
+      const orden = column.getIsSorted();
+      return (
+        <button
+          type="button"
+          onClick={() => column.toggleSorting(orden === "asc")}
+          className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+        >
+          Producto / Insumo
+          {orden === "asc" && <ArrowUp className="w-3.5 h-3.5" />}
+          {orden === "desc" && <ArrowDown className="w-3.5 h-3.5" />}
+          {!orden && <ArrowUpDown className="w-3.5 h-3.5 opacity-40" />}
+        </button>
+      );
+    },
   },
   {
     accessorKey: "suplier",

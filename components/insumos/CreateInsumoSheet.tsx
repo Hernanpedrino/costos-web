@@ -21,10 +21,11 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 
-import { updateInsumoAction } from "@/actions/insumos"
+import { createInsumoAction } from "@/actions/insumos"
 import type { Insumo } from "@/types"
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
+// Mismo schema que EditInsumoSheet, para que ambos formularios se comporten igual.
 
 const formSchema = z.object({
   name: z.string().min(2, "Mínimo 2 caracteres").max(32, "Máximo 32 caracteres"),
@@ -37,47 +38,47 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>
 
+const valoresIniciales: Partial<FormValues> = {
+  name: "",
+  suplier: "",
+  price: undefined,
+  codigoBejerman: "",
+}
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
-interface EditInsumoSheetProps {
-  insumo: Insumo | null       // null = sheet cerrado
+interface CreateInsumoSheetProps {
+  open: boolean
   onClose: () => void
-  onSaved: (insumo: Insumo) => void
+  onCreated: (insumo: Insumo) => void
 }
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetProps) {
+export function CreateInsumoSheet({ open, onClose, onCreated }: CreateInsumoSheetProps) {
   const [feedback, setFeedback] = useState<string | null>(null)
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: { name: "", suplier: "", price: undefined },
+    defaultValues: valoresIniciales,
   })
 
-  // Cuando cambia el insumo seleccionado, pre-cargamos el form.
+  // Cada vez que se abre el sheet, arrancamos con el form limpio.
   // Ajuste de estado durante el render (no en un efecto) para evitar
   // un render en cascada innecesario.
-  const [insumoPrevio, setInsumoPrevio] = useState(insumo)
-  if (insumo !== insumoPrevio) {
-    setInsumoPrevio(insumo)
-    if (insumo) {
-      form.reset({
-        name: insumo.name,
-        suplier: insumo.suplier,
-        price: insumo.price,
-        codigoBejerman: insumo.codigoBejerman ?? '',
-      })
+  const [openPrevio, setOpenPrevio] = useState(open)
+  if (open !== openPrevio) {
+    setOpenPrevio(open)
+    if (open) {
+      form.reset(valoresIniciales)
+      setFeedback(null)
     }
-    setFeedback(null)
   }
 
   const onSubmit = async (data: FormValues) => {
-    if (!insumo) return
     setFeedback(null)
 
-    const result = await updateInsumoAction({
-      id: insumo.id,
+    const result = await createInsumoAction({
       name: data.name,
       suplier: data.suplier,
       price: data.price.toString(),
@@ -85,7 +86,7 @@ export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetPro
     })
 
     if (result.success) {
-      onSaved(result.data)
+      onCreated(result.data)
       onClose()
     } else {
       setFeedback(result.error)
@@ -93,12 +94,12 @@ export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetPro
   }
 
   return (
-    <Sheet open={!!insumo} onOpenChange={(open) => { if (!open) onClose() }}>
+    <Sheet open={open} onOpenChange={(o) => { if (!o) onClose() }}>
       <SheetContent>
         <SheetHeader>
-          <SheetTitle>Editar insumo</SheetTitle>
+          <SheetTitle>Nuevo insumo</SheetTitle>
           <SheetDescription>
-            Modificá los datos y guardá los cambios.
+            Completá los datos para cargar un insumo nuevo.
           </SheetDescription>
         </SheetHeader>
 
@@ -110,10 +111,11 @@ export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetPro
               control={form.control}
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="edit-name">Nombre</FieldLabel>
+                  <FieldLabel htmlFor="create-name">Nombre</FieldLabel>
                   <Input
                     {...field}
-                    id="edit-name"
+                    id="create-name"
+                    placeholder="Ají molido"
                     autoComplete="off"
                     aria-invalid={fieldState.invalid}
                   />
@@ -121,18 +123,19 @@ export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetPro
                 </Field>
               )}
             />
+
             <Controller
               name="codigoBejerman"
               control={form.control}
               render={({ field }) => (
                 <Field>
-                  <FieldLabel htmlFor="edit-codigo-bej">
+                  <FieldLabel htmlFor="create-codigo-bej">
                     Código Bejerman <span className="text-gray-400 text-xs">(opcional)</span>
                   </FieldLabel>
                   <Input
                     {...field}
                     value={field.value ?? ''}
-                    id="edit-codigo-bej"
+                    id="create-codigo-bej"
                     placeholder="ADI0000015"
                     autoComplete="off"
                   />
@@ -145,10 +148,11 @@ export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetPro
               control={form.control}
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="edit-suplier">Proveedor</FieldLabel>
+                  <FieldLabel htmlFor="create-suplier">Proveedor</FieldLabel>
                   <Input
                     {...field}
-                    id="edit-suplier"
+                    id="create-suplier"
+                    placeholder="Alimentos del Plata"
                     autoComplete="off"
                     aria-invalid={fieldState.invalid}
                   />
@@ -162,17 +166,19 @@ export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetPro
               control={form.control}
               render={({ field, fieldState }) => (
                 <Field data-invalid={fieldState.invalid}>
-                  <FieldLabel htmlFor="edit-price">Precio</FieldLabel>
+                  <FieldLabel htmlFor="create-price">Precio</FieldLabel>
                   <Input
                     name={field.name}
                     ref={field.ref}
                     onBlur={field.onBlur}
                     value={Number.isNaN(field.value) || field.value === undefined ? "" : field.value}
                     onChange={(e) => field.onChange(e.target.valueAsNumber)}
-                    id="edit-price"
+                    id="create-price"
                     type="number"
                     step="0.01"
                     min="0"
+                    placeholder="4500"
+                    autoComplete="off"
                     aria-invalid={fieldState.invalid}
                   />
                   {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
@@ -195,7 +201,7 @@ export function EditInsumoSheet({ insumo, onClose, onSaved }: EditInsumoSheetPro
               className="flex-1 bg-green-800 text-white hover:bg-green-600
                          disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {form.formState.isSubmitting ? "Guardando..." : "Guardar cambios"}
+              {form.formState.isSubmitting ? "Guardando..." : "Crear insumo"}
             </Button>
             <Button
               type="button"

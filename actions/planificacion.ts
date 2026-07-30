@@ -39,41 +39,31 @@ function generarMeses(n: number): string[] {
   return meses
 }
 
-function mesAnioAnterior(mes: string): string {
-  const [anio, m] = mes.split('-').map(Number)
-  return `${anio - 1}-${String(m).padStart(2, '0')}`
-}
-
-function proxMes(): string {
-  const hoy = new Date()
-  const d = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 1)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+/** Etiqueta "YYYY-MM" (local) del mes al que pertenece una fecha. */
+function mesDeFecha(fecha: Date): string {
+  return `${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2, '0')}`
 }
 
 // ─── Consumo de materias primas ───────────────────────────────────────────────
 
 export async function getConsumoPrimasAction(): Promise<ConsumoMateriaPrima[]> {
   const meses12 = generarMeses(12)
-  const meses6 = meses12.slice(-6)
-  const proximo = proxMes()
-  const mismoMesAnt = mesAnioAnterior(proximo)
+  const desdeRango = new Date(`${meses12[0]}-01`)
 
-  // Ventas de elaborados por mes (CANE + NP + LILI)
+  // Ventas de elaborados de TODO el rango en una sola query por fuente
+  // (antes se hacía una query por mes × fuente = 36 round-trips).
   const [ventasCane, npCane, ventasLili, mapeos] = await Promise.all([
-    prisma.bejVentaDet.groupBy({
-      by: ['artCodigo'],
-      where: { fecha: { gte: new Date(`${meses12[0]}-01`) } },
-      _sum: { cantidad: true }
+    prisma.bejVentaDet.findMany({
+      where: { fecha: { gte: desdeRango } },
+      select: { artCodigo: true, cantidad: true, fecha: true }
     }),
-    prisma.bejNPDet.groupBy({
-      by: ['artCodigo'],
-      where: { fecha: { gte: new Date(`${meses12[0]}-01`) } },
-      _sum: { cantidad: true }
+    prisma.bejNPDet.findMany({
+      where: { fecha: { gte: desdeRango } },
+      select: { artCodigo: true, cantidad: true, fecha: true }
     }),
-    prisma.liliVentaDet.groupBy({
-      by: ['artCodigo'],
-      where: { fecha: { gte: new Date(`${meses12[0]}-01`) } },
-      _sum: { cantidad: true }
+    prisma.liliVentaDet.findMany({
+      where: { fecha: { gte: desdeRango } },
+      select: { artCodigo: true, cantidad: true, fecha: true }
     }),
     prisma.bejArticuloMapeo.findMany({
       where: { verificado: true },
@@ -81,73 +71,27 @@ export async function getConsumoPrimasAction(): Promise<ConsumoMateriaPrima[]> {
     })
   ])
 
-  // Ventas mensuales por artículo elaborado
   const liliACane = new Map(mapeos.map(m => [m.codigoLili, m.codigoCane]))
 
-  // Necesitamos ventas MES A MES — hacer query por mes
+  // Ventas agrupadas en memoria por mes y artículo
   const ventasPorMesArt = new Map<string, Map<string, number>>()
-
-  for (const mes of meses12) {
-    const [anioM, mesM] = mes.split('-').map(Number)
-    const desde = new Date(Date.UTC(anioM, mesM - 1, 1))
-    const hasta = new Date(Date.UTC(anioM, mesM, 1))
-
-    const [vc, np, vl] = await Promise.all([
-      prisma.bejVentaDet.groupBy({
-        by: ['artCodigo'],
-        where: { fecha: { gte: desde, lt: hasta } },
-        _sum: { cantidad: true }
-      }),
-      prisma.bejNPDet.groupBy({
-        by: ['artCodigo'],
-        where: { fecha: { gte: desde, lt: hasta } },
-        _sum: { cantidad: true }
-      }),
-      prisma.liliVentaDet.groupBy({
-        by: ['artCodigo'],
-        where: { fecha: { gte: desde, lt: hasta } },
-        _sum: { cantidad: true }
-      }),
-    ])
-
-    const mesMap = new Map<string, number>()
-    vc.forEach(v => mesMap.set(v.artCodigo, (mesMap.get(v.artCodigo) ?? 0) + Number(v._sum.cantidad ?? 0)))
-    np.forEach(v => mesMap.set(v.artCodigo, (mesMap.get(v.artCodigo) ?? 0) + Number(v._sum.cantidad ?? 0)))
-    vl.forEach(v => {
-      const cane = liliACane.get(v.artCodigo)
-      if (cane) mesMap.set(cane, (mesMap.get(cane) ?? 0) + Number(v._sum.cantidad ?? 0))
-    })
-    ventasPorMesArt.set(mes, mesMap)
+  const sumarVenta = (mes: string, artCodigo: string, cantidad: number) => {
+    if (!ventasPorMesArt.has(mes)) ventasPorMesArt.set(mes, new Map())
+    const mesMap = ventasPorMesArt.get(mes)!
+    mesMap.set(artCodigo, (mesMap.get(artCodigo) ?? 0) + cantidad)
   }
 
-  // Mismo mes año anterior
-  const [anioAnt, mesAnt] = mismoMesAnt.split('-').map(Number)
-  const mismoMesDesde = new Date(Date.UTC(anioAnt, mesAnt - 1, 1))
-  const mismoMesHasta = new Date(Date.UTC(anioAnt, mesAnt, 1))
-  const [vcAnt, npAnt, vlAnt] = await Promise.all([
-    prisma.bejVentaDet.groupBy({
-      by: ['artCodigo'],
-      where: { fecha: { gte: mismoMesDesde, lt: mismoMesHasta } },
-      _sum: { cantidad: true }
-    }),
-    prisma.bejNPDet.groupBy({
-      by: ['artCodigo'],
-      where: { fecha: { gte: mismoMesDesde, lt: mismoMesHasta } },
-      _sum: { cantidad: true }
-    }),
-    prisma.liliVentaDet.groupBy({
-      by: ['artCodigo'],
-      where: { fecha: { gte: mismoMesDesde, lt: mismoMesHasta } },
-      _sum: { cantidad: true }
-    }),
-  ])
-  const ventasAntMap = new Map<string, number>()
-  vcAnt.forEach(v => ventasAntMap.set(v.artCodigo, (ventasAntMap.get(v.artCodigo) ?? 0) + Number(v._sum.cantidad ?? 0)))
-  npAnt.forEach(v => ventasAntMap.set(v.artCodigo, (ventasAntMap.get(v.artCodigo) ?? 0) + Number(v._sum.cantidad ?? 0)))
-  vlAnt.forEach(v => {
+  ventasCane.forEach(v => sumarVenta(mesDeFecha(v.fecha), v.artCodigo, Number(v.cantidad)))
+  npCane.forEach(v => sumarVenta(mesDeFecha(v.fecha), v.artCodigo, Number(v.cantidad)))
+  ventasLili.forEach(v => {
     const cane = liliACane.get(v.artCodigo)
-    if (cane) ventasAntMap.set(cane, (ventasAntMap.get(cane) ?? 0) + Number(v._sum.cantidad ?? 0))
+    if (cane) sumarVenta(mesDeFecha(v.fecha), cane, Number(v.cantidad))
   })
+
+  // El "mismo mes, año anterior" respecto al mes próximo cae matemáticamente
+  // siempre en meses12[0] (el mes más viejo de esta ventana de 12 meses),
+  // así que se reutiliza en vez de volver a consultar la DB.
+  const ventasAntMap = ventasPorMesArt.get(meses12[0]) ?? new Map<string, number>()
 
   // Fórmulas y componentes
   const producidos = await prisma.bejProdFormulaProducido.findMany({
@@ -243,8 +187,7 @@ export async function getConsumoPrimasAction(): Promise<ConsumoMateriaPrima[]> {
 
 export async function getDemandaArticulosAction(): Promise<DemandaArticulo[]> {
   const meses12 = generarMeses(12)
-  const proximo = proxMes()
-  const mismoMesAnt = mesAnioAnterior(proximo)
+  const desdeRango = new Date(`${meses12[0]}-01`)
 
   const mapeos = await prisma.bejArticuloMapeo.findMany({
     where: { verificado: true },
@@ -258,84 +201,46 @@ export async function getDemandaArticulosAction(): Promise<DemandaArticulo[]> {
   })
   const elaboradosSet = new Set(producidos.map(p => p.artCodigo))
 
-  // Ventas mensuales
-  const ventasPorMes = new Map<string, Map<string, { cantidad: number; neto: number }>>()
-
-  for (const mes of meses12) {
-    const [anioM, mesM] = mes.split('-').map(Number)
-    const desde = new Date(Date.UTC(anioM, mesM - 1, 1))
-    const hasta = new Date(Date.UTC(anioM, mesM, 1))
-
-    const [vc, np, vl] = await Promise.all([
-      prisma.bejVentaDet.groupBy({
-        by: ['artCodigo'],
-        where: { fecha: { gte: desde, lt: hasta } },
-        _sum: { cantidad: true, neto: true }
-      }),
-      prisma.bejNPDet.groupBy({
-        by: ['artCodigo'],
-        where: { fecha: { gte: desde, lt: hasta } },
-        _sum: { cantidad: true, importeTotal: true }
-      }),
-      prisma.liliVentaDet.groupBy({
-        by: ['artCodigo'],
-        where: { fecha: { gte: desde, lt: hasta } },
-        _sum: { cantidad: true, neto: true }
-      }),
-    ])
-
-    const mesMap = new Map<string, { cantidad: number; neto: number }>()
-    vc.forEach(v => {
-      const c = mesMap.get(v.artCodigo) ?? { cantidad: 0, neto: 0 }
-      c.cantidad += Number(v._sum.cantidad ?? 0)
-      c.neto += Number(v._sum.neto ?? 0)
-      mesMap.set(v.artCodigo, c)
-    })
-    np.forEach(v => {
-      const c = mesMap.get(v.artCodigo) ?? { cantidad: 0, neto: 0 }
-      c.cantidad += Number(v._sum.cantidad ?? 0)
-      c.neto += Number(v._sum.importeTotal ?? 0)
-      mesMap.set(v.artCodigo, c)
-    })
-    vl.forEach(v => {
-      const cane = liliACane.get(v.artCodigo)
-      if (!cane) return
-      const c = mesMap.get(cane) ?? { cantidad: 0, neto: 0 }
-      c.cantidad += Number(v._sum.cantidad ?? 0)
-      c.neto += Number(v._sum.neto ?? 0)
-      mesMap.set(cane, c)
-    })
-    ventasPorMes.set(mes, mesMap)
-  }
-
-  // Mismo mes año anterior
-  const [anioAnt, mesAnt] = mismoMesAnt.split('-').map(Number)
-  const mismoMesDesde = new Date(Date.UTC(anioAnt, mesAnt - 1, 1))
-  const mismoMesHasta = new Date(Date.UTC(anioAnt, mesAnt, 1))
-  const [vcAnt, npAnt, vlAnt] = await Promise.all([
-    prisma.bejVentaDet.groupBy({
-      by: ['artCodigo'],
-      where: { fecha: { gte: mismoMesDesde, lt: mismoMesHasta } },
-      _sum: { cantidad: true, neto: true }
+  // Ventas de TODO el rango en una sola query por fuente, agrupadas en
+  // memoria por mes (antes: una query por mes × fuente = 36 round-trips).
+  const [ventasCane, npCane, ventasLili] = await Promise.all([
+    prisma.bejVentaDet.findMany({
+      where: { fecha: { gte: desdeRango } },
+      select: { artCodigo: true, cantidad: true, neto: true, fecha: true }
     }),
-    prisma.bejNPDet.groupBy({
-      by: ['artCodigo'],
-      where: { fecha: { gte: mismoMesDesde, lt: mismoMesHasta } },
-      _sum: { cantidad: true, importeTotal: true }
+    prisma.bejNPDet.findMany({
+      where: { fecha: { gte: desdeRango } },
+      select: { artCodigo: true, cantidad: true, importeTotal: true, fecha: true }
     }),
-    prisma.liliVentaDet.groupBy({
-      by: ['artCodigo'],
-      where: { fecha: { gte: mismoMesDesde, lt: mismoMesHasta } },
-      _sum: { cantidad: true, neto: true }
+    prisma.liliVentaDet.findMany({
+      where: { fecha: { gte: desdeRango } },
+      select: { artCodigo: true, cantidad: true, neto: true, fecha: true }
     }),
   ])
-  const antMap = new Map<string, number>()
-  vcAnt.forEach(v => antMap.set(v.artCodigo, (antMap.get(v.artCodigo) ?? 0) + Number(v._sum.cantidad ?? 0)))
-  npAnt.forEach(v => antMap.set(v.artCodigo, (antMap.get(v.artCodigo) ?? 0) + Number(v._sum.cantidad ?? 0)))
-  vlAnt.forEach(v => {
+
+  const ventasPorMes = new Map<string, Map<string, { cantidad: number; neto: number }>>()
+  const sumarVenta = (mes: string, artCodigo: string, cantidad: number, neto: number) => {
+    if (!ventasPorMes.has(mes)) ventasPorMes.set(mes, new Map())
+    const mesMap = ventasPorMes.get(mes)!
+    const acumulado = mesMap.get(artCodigo) ?? { cantidad: 0, neto: 0 }
+    acumulado.cantidad += cantidad
+    acumulado.neto += neto
+    mesMap.set(artCodigo, acumulado)
+  }
+
+  ventasCane.forEach(v => sumarVenta(mesDeFecha(v.fecha), v.artCodigo, Number(v.cantidad), Number(v.neto)))
+  npCane.forEach(v => sumarVenta(mesDeFecha(v.fecha), v.artCodigo, Number(v.cantidad), Number(v.importeTotal)))
+  ventasLili.forEach(v => {
     const cane = liliACane.get(v.artCodigo)
-    if (cane) antMap.set(cane, (antMap.get(cane) ?? 0) + Number(v._sum.cantidad ?? 0))
+    if (cane) sumarVenta(mesDeFecha(v.fecha), cane, Number(v.cantidad), Number(v.neto))
   })
+
+  // El "mismo mes, año anterior" respecto al mes próximo cae matemáticamente
+  // siempre en meses12[0] (el mes más viejo de esta ventana de 12 meses),
+  // así que se reutiliza en vez de volver a consultar la DB.
+  const ventasMesMasViejo = ventasPorMes.get(meses12[0]) ?? new Map<string, { cantidad: number; neto: number }>()
+  const antMap = new Map<string, number>()
+  ventasMesMasViejo.forEach((v, art) => antMap.set(art, v.cantidad))
 
   // Artículos únicos con ventas
   const todosArts = new Set<string>()

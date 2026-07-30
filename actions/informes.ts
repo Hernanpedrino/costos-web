@@ -2,6 +2,7 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
+import { calcularPrecioFormula } from "@/lib/calcularPrecioFormula"
 import type { ISODateString } from "@/types"
 
 export interface InformeFormula {
@@ -81,49 +82,4 @@ export async function getInformeFormulasAction(): Promise<InformeFormula[]> {
       ultimoCambio,
     }
   })
-}
-
-// ─── Helper de cálculo recursivo (igual que en formulas.ts) ──────────────────
-
-type ItemConIngrediente = any  // usa el tipo real de Prisma en tu proyecto
-
-function calcularPrecioNivel3(items: ItemConIngrediente[]): number {
-  const subtotales = items.map((i: ItemConIngrediente) => ({
-    precio: i.insumo ? i.insumo.price.toNumber() : 0,
-    cantidad: i.cantidad.toNumber(),
-  }))
-  const sumaSubtotales = subtotales.reduce((t: number, i: any) => t + i.precio * i.cantidad, 0)
-  const sumaCantidades = subtotales.reduce((t: number, i: any) => t + i.cantidad, 0)
-  return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
-}
-
-function calcularPrecioDetalle(item: ItemConIngrediente): number {
-  if (item.insumo) return item.insumo.price.toNumber()
-
-  if (item.subFormula) {
-    const subItems = item.subFormula.items.map((subItem: ItemConIngrediente) => ({
-      precio: subItem.insumo
-        ? subItem.insumo.price.toNumber()
-        : subItem.subFormula
-          ? calcularPrecioNivel3(subItem.subFormula.items)
-          : 0,
-      cantidad: subItem.cantidad.toNumber(),
-    }))
-    const sumaSubtotales = subItems.reduce((t: number, i: any) => t + i.precio * i.cantidad, 0)
-    const sumaCantidades = subItems.reduce((t: number, i: any) => t + i.cantidad, 0)
-    return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
-  }
-
-  return 0
-}
-
-function calcularPrecioFormula(items: ItemConIngrediente[]): number {
-  const subtotales = items.map((item) => ({
-    precio: calcularPrecioDetalle(item),
-    cantidad: item.cantidad.toNumber(),
-  }))
-
-  const sumaSubtotales = subtotales.reduce((t, i) => t + i.precio * i.cantidad, 0)
-  const sumaCantidades = subtotales.reduce((t, i) => t + i.cantidad, 0)
-  return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
 }

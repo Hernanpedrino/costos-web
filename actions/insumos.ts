@@ -42,6 +42,7 @@ export async function createInsumoAction(
         name: data.name,
         suplier: data.suplier,
         price: new Prisma.Decimal(data.price),
+        codigoBejerman: data.codigoBejerman || null,
       },
     });
 

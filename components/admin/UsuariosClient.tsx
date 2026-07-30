@@ -25,14 +25,15 @@ import { Separator } from "@/components/ui/separator"
 import {
   createUsuarioAction,
   toggleUsuarioActivoAction,
+  resetPasswordAction,
   type UsuarioListItem,
 } from "@/actions/usuarios"
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
 const formSchema = z.object({
-  nombre:   z.string().min(2, "Mínimo 2 caracteres"),
-  email:    z.string().email("Email inválido"),
+  nombre: z.string().min(2, "Mínimo 2 caracteres"),
+  email: z.string().email("Email inválido"),
   password: z.string().min(6, "Mínimo 6 caracteres"),
 })
 
@@ -50,6 +51,9 @@ const formatearFecha = (iso: string) =>
 export function UsuariosClient({ initialData }: { initialData: UsuarioListItem[] }) {
   const [usuarios, setUsuarios] = useState<UsuarioListItem[]>(initialData)
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null)
+  const [resetando, setResetando] = useState<string | null>(null)  // id del usuario
+  const [nuevaPass, setNuevaPass] = useState('')
+  const [feedbackReset, setFeedbackReset] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -75,6 +79,21 @@ export function UsuariosClient({ initialData }: { initialData: UsuarioListItem[]
       setUsuarios((prev) =>
         prev.map((u) => (u.id === id ? { ...u, activo: !u.activo } : u))
       )
+    }
+  }
+  async function handleReset(id: string) {
+    setFeedbackReset(null)
+    if (nuevaPass.length < 6) {
+      setFeedbackReset({ type: 'error', msg: 'Mínimo 6 caracteres.' })
+      return
+    }
+    const result = await resetPasswordAction({ id, newPassword: nuevaPass })
+    if (result.success) {
+      setFeedbackReset({ type: 'success', msg: 'Contraseña restablecida.' })
+      setResetando(null)
+      setNuevaPass('')
+    } else {
+      setFeedbackReset({ type: 'error', msg: result.error })
     }
   }
 
@@ -125,11 +144,10 @@ export function UsuariosClient({ initialData }: { initialData: UsuarioListItem[]
             </FieldGroup>
 
             {feedback && (
-              <p className={`mt-4 text-sm px-3 py-2 rounded-md ${
-                feedback.type === "success"
-                  ? "bg-green-50 text-green-800 border border-green-200"
-                  : "bg-red-50 text-red-700 border border-red-200"
-              }`}>
+              <p className={`mt-4 text-sm px-3 py-2 rounded-md ${feedback.type === "success"
+                ? "bg-green-50 text-green-800 border border-green-200"
+                : "bg-red-50 text-red-700 border border-red-200"
+                }`}>
                 {feedback.message}
               </p>
             )}
@@ -155,35 +173,71 @@ export function UsuariosClient({ initialData }: { initialData: UsuarioListItem[]
           {usuarios.map((u) => (
             <div
               key={u.id}
-              className="flex items-center justify-between border rounded-lg px-4 py-3"
+              className="flex flex-col border rounded-lg px-4 py-3"  // ← cambiá a flex-col
             >
-              <div>
-                <p className="font-medium text-sm">{u.nombre}</p>
-                <p className="text-xs text-muted-foreground">{u.email}</p>
-                <p className="text-xs text-muted-foreground">
-                  {u.rol} · Creado: {formatearFecha(u.createdAt)}
-                </p>
+              <div className="flex items-center justify-between">
+                {/* Info del usuario */}
+                <div>
+                  <p className="font-medium text-sm">{u.nombre}</p>
+                  <p className="text-xs text-muted-foreground">{u.email}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {u.rol} · Creado: {formatearFecha(u.createdAt)}
+                  </p>
+                </div>
+
+                {/* Botones */}
+                <div className="flex items-center gap-3">
+                  <span className={`text-xs font-medium px-2 py-1 rounded-full ${u.activo
+                      ? "bg-green-50 text-green-700 border border-green-200"
+                      : "bg-red-50 text-red-600 border border-red-200"
+                    }`}>
+                    {u.activo ? "Activo" : "Inactivo"}
+                  </span>
+                  {u.rol !== "ADMIN" && (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => handleToggle(u.id)} className="text-xs">
+                        {u.activo ? "Desactivar" : "Activar"}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setResetando(prev => prev === u.id ? null : u.id)
+                          setNuevaPass('')
+                          setFeedbackReset(null)
+                        }}
+                        className="text-xs"
+                      >
+                        🔑 Reset pass
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className={`text-xs font-medium px-2 py-1 rounded-full ${
-                  u.activo
-                    ? "bg-green-50 text-green-700 border border-green-200"
-                    : "bg-red-50 text-red-600 border border-red-200"
-                }`}>
-                  {u.activo ? "Activo" : "Inactivo"}
-                </span>
-                {/* No mostrar toggle para usuarios ADMIN */}
-                {u.rol !== "ADMIN" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleToggle(u.id)}
-                    className="text-xs"
-                  >
-                    {u.activo ? "Desactivar" : "Activar"}
+
+              {/* Panel de reset inline */}
+              {resetando === u.id && (
+                <div className="mt-3 flex gap-2 items-center">
+                  <input
+                    type="password"
+                    value={nuevaPass}
+                    onChange={e => setNuevaPass(e.target.value)}
+                    placeholder="Nueva contraseña"
+                    className="border rounded px-3 py-1.5 text-sm flex-1"
+                  />
+                  <Button size="sm" onClick={() => handleReset(u.id)} className="bg-green-700 text-white text-xs">
+                    Guardar
                   </Button>
-                )}
-              </div>
+                  <Button size="sm" variant="outline" onClick={() => setResetando(null)} className="text-xs">
+                    Cancelar
+                  </Button>
+                  {feedbackReset && (
+                    <span className={`text-xs ${feedbackReset.type === 'success' ? 'text-green-700' : 'text-red-600'}`}>
+                      {feedbackReset.msg}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>

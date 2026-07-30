@@ -41,6 +41,7 @@ enum TipoAccion {
 enum EntidadAccion {
   Insumo
   Formula
+  Usuario
 }
 
 model RegistroAccion {

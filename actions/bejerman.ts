@@ -2,6 +2,7 @@
 "use server"
 
 import { prisma } from "@/lib/prisma"
+import { calcularPrecioFormula } from "@/lib/calcularPrecioFormula"
 
 export interface ComponenteCosto {
   nombre: string
@@ -40,49 +41,6 @@ export interface RankingArticulo {
   fuenteCosto: 'compra' | 'produccion' | null
   margenPct: number | null
   precioSIV: number | null
-}
-
-// ─── Helper: construir mapa de precios desde Costos El Chilo ─────────────────
-
-type FormulaChiloConItems = Awaited<ReturnType<typeof prisma.formula.findMany<{
-  include: {
-    items: {
-      include: {
-        insumo: true
-        subFormula: {
-          include: {
-            items: {
-              include: {
-                insumo: true
-                subFormula: { include: { items: { include: { insumo: true } } } }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}>>>[number]
-
-function calcularPrecioFormula(formula: FormulaChiloConItems): number {
-  const items = formula.items.map(item => {
-    const cantidad = item.cantidad.toNumber()
-    let precio = 0
-    if (item.insumo) {
-      precio = item.insumo.price.toNumber()
-    } else if (item.subFormula) {
-      const subSuma = item.subFormula.items.reduce((t, si) =>
-        t + (si.insumo?.price.toNumber() ?? 0) * si.cantidad.toNumber(), 0)
-      const subCant = item.subFormula.items.reduce((t, si) =>
-        t + si.cantidad.toNumber(), 0)
-      precio = subCant > 0 ? subSuma / subCant : 0
-    }
-    return { precio, cantidad }
-  })
-
-  const sumaSubtotales = items.reduce((t, i) => t + i.precio * i.cantidad, 0)
-  const sumaCantidades = items.reduce((t, i) => t + i.cantidad, 0)
-  return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
 }
 
 // ─── Helper: traer fórmulas de Costos El Chilo con include completo ──────────
@@ -137,7 +95,7 @@ async function construirMapasPrecios(
   // 1. Fórmulas de Costos El Chilo
   formulasChilo.forEach(f => {
     if (!f.codigoBejerman) return
-    precioMap.set(f.codigoBejerman, calcularPrecioFormula(f))
+    precioMap.set(f.codigoBejerman, calcularPrecioFormula(f.items))
   })
 
   // 2. Insumos de Costos El Chilo con codigoBejerman

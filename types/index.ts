@@ -233,6 +233,7 @@ export interface CreateInsumoDTO {
   suplier: string;
   /** Precio como string para manejar decimales en formularios */
   price: string;
+  codigoBejerman?: string;
 }
 
 export interface UpdateInsumoDTO extends Partial<CreateInsumoDTO> {

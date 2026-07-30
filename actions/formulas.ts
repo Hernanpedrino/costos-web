@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@/generated/prisma";
 import { serializarFormula } from "@/types";
 import { registrarAccion } from "@/lib/registrarAccion";
+import { calcularPrecioDetalle } from "@/lib/calcularPrecioFormula";
 import { auth } from "@/auth";
 import type { Formula, CreateFormulaDTO, ISODateString } from "@/types";
 
@@ -26,58 +27,6 @@ export interface FormulaListItem {
     subFormulaId: string | null;
   }[];
   precioTotal: number;
-}
-
-type FormulaDetalleConIngrediente = Prisma.FormulaDetalleGetPayload<{
-  include: {
-    insumo: true;
-    subFormula: {
-      include: {
-        items: {
-          include: {
-            insumo: true;
-            subFormula: {
-              include: {
-                items: {
-                  include: { insumo: true };
-                };
-              };
-            };
-          };
-        };
-      };
-    };
-  };
-}>;
-
-function calcularPrecioNivel3(items: any[]): number {
-  const subtotales = items.map((i: any) => ({
-    precio: i.insumo ? i.insumo.price.toNumber() : 0,
-    cantidad: i.cantidad.toNumber(),
-  }))
-  const sumaSubtotales = subtotales.reduce((t, i) => t + i.precio * i.cantidad, 0)
-  const sumaCantidades = subtotales.reduce((t, i) => t + i.cantidad, 0)
-  return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
-}
-
-function calcularPrecioDetalle(item: FormulaDetalleConIngrediente): number {
-  if (item.insumo) return item.insumo.price.toNumber();
-
-  if (item.subFormula) {
-    const subItems = item.subFormula.items.map((subItem) => ({
-      precio: subItem.insumo
-        ? subItem.insumo.price.toNumber()
-        : subItem.subFormula
-          ? calcularPrecioNivel3(subItem.subFormula.items)
-          : 0,
-      cantidad: subItem.cantidad.toNumber(),
-    }))
-    const sumaSubtotales = subItems.reduce((t, i) => t + i.precio * i.cantidad, 0)
-    const sumaCantidades = subItems.reduce((t, i) => t + i.cantidad, 0)
-    return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
-  }
-
-  return 0;
 }
 
 // ─── GET ──────────────────────────────────────────────────────────────────────

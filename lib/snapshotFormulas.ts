@@ -4,36 +4,7 @@
 
 import { prisma } from "@/lib/prisma"
 import { Prisma } from "@/generated/prisma"
-
-type ItemConIngrediente = any
-
-function calcularPrecioNivel3(items: ItemConIngrediente[]): number {
-  const subtotales = items.map((i: ItemConIngrediente) => ({
-    precio:   i.insumo ? i.insumo.price.toNumber() : 0,
-    cantidad: i.cantidad.toNumber(),
-  }))
-  const sumaSubtotales = subtotales.reduce((t: number, i: any) => t + i.precio * i.cantidad, 0)
-  const sumaCantidades  = subtotales.reduce((t: number, i: any) => t + i.cantidad, 0)
-  return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
-}
-
-function calcularPrecioDetalle(item: ItemConIngrediente): number {
-  if (item.insumo) return item.insumo.price.toNumber()
-  if (item.subFormula) {
-    const subItems = item.subFormula.items.map((subItem: ItemConIngrediente) => ({
-      precio: subItem.insumo
-        ? subItem.insumo.price.toNumber()
-        : subItem.subFormula
-        ? calcularPrecioNivel3(subItem.subFormula.items)
-        : 0,
-      cantidad: subItem.cantidad.toNumber(),
-    }))
-    const sumaSubtotales = subItems.reduce((t: number, i: any) => t + i.precio * i.cantidad, 0)
-    const sumaCantidades  = subItems.reduce((t: number, i: any) => t + i.cantidad, 0)
-    return sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
-  }
-  return 0
-}
+import { calcularPrecioFormula } from "@/lib/calcularPrecioFormula"
 
 export async function guardarSnapshotFormulas(insumoId: string): Promise<void> {
   // Buscar todas las fórmulas que usan este insumo (directamente o via sub-fórmula)
@@ -109,13 +80,7 @@ export async function guardarSnapshotFormulas(insumoId: string): Promise<void> {
 
   // Calcular precio actual de cada fórmula y guardar snapshot
   const snapshots = todas.map((formula) => {
-    const subtotales = formula.items.map((item) => ({
-      precio:   calcularPrecioDetalle(item),
-      cantidad: item.cantidad.toNumber(),
-    }))
-    const sumaSubtotales = subtotales.reduce((t, i) => t + i.precio * i.cantidad, 0)
-    const sumaCantidades  = subtotales.reduce((t, i) => t + i.cantidad, 0)
-    const precio          = sumaCantidades > 0 ? sumaSubtotales / sumaCantidades : 0
+    const precio = calcularPrecioFormula(formula.items)
 
     return {
       formulaId: formula.id,

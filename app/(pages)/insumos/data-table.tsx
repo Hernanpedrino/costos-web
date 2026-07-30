@@ -6,6 +6,8 @@ import {
   getCoreRowModel,
   getPaginationRowModel,
   getFilteredRowModel,
+  getSortedRowModel,
+  SortingState,
   useReactTable,
 } from "@tanstack/react-table";
 import { Button } from "@/components/ui/button";
@@ -19,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { Input } from "@/components/ui/input";
 
 interface DataTableProps<TData, TValue> {
@@ -26,14 +29,18 @@ interface DataTableProps<TData, TValue> {
   data: TData[];
   // Opcional: si se provee, las filas son clickeables
   onRowClick?: (row: TData) => void;
+  // Opcional: contenido extra (ej. botón "Crear") al lado de la búsqueda
+  actions?: ReactNode;
 }
 
 export function DataTable<TData, TValue>({
   columns,
   data,
   onRowClick,
+  actions,
 }: DataTableProps<TData, TValue>) {
   const [filtering, setFiltering] = useState("");
+  const [sorting, setSorting] = useState<SortingState>([]);
 
   const table = useReactTable({
     data,
@@ -41,19 +48,24 @@ export function DataTable<TData, TValue>({
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
-    state: { globalFilter: filtering },
+    getSortedRowModel: getSortedRowModel(),
+    state: { globalFilter: filtering, sorting },
     onGlobalFilterChange: setFiltering,
+    onSortingChange: setSorting,
   });
 
   return (
     <div className="overflow-hidden rounded-md border shadow-xl">
-      <Input
-        type="text"
-        placeholder="Buscar insumo"
-        className="w-1/4 m-2 border-green-800"
-        value={filtering}
-        onChange={(e) => setFiltering(e.target.value)}
-      />
+      <div className="flex items-center justify-between gap-2 m-2">
+        <Input
+          type="text"
+          placeholder="Buscar insumo"
+          className="w-full sm:w-1/4 border-green-800"
+          value={filtering}
+          onChange={(e) => setFiltering(e.target.value)}
+        />
+        {actions}
+      </div>
 
       <Table>
         <TableHeader>

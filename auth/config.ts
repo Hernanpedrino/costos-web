@@ -2,7 +2,10 @@
 import type { NextAuthConfig } from "next-auth"
 
 export const authConfig: NextAuthConfig = {
-  session: { strategy: "jwt" },
+  session: {
+    strategy: "jwt",
+    maxAge: 60 * 60,
+  },
   trustHost: true,
   pages: {
     signIn: "/login",
@@ -11,7 +14,7 @@ export const authConfig: NextAuthConfig = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.id   = user.id
+        token.id = user.id
         token.role = (user as any).role
       }
       return token
@@ -19,7 +22,7 @@ export const authConfig: NextAuthConfig = {
     async session({ session, token }) {
       const user = session.user as unknown as { id: string; email: string; name: string; role: string }
       if (token) {
-        user.id   = (token.id   as string) ?? ""
+        user.id = (token.id as string) ?? ""
         user.role = (token.role as string) ?? ""
       }
       return session

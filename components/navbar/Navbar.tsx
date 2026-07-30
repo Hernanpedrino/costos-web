@@ -38,7 +38,7 @@ export const Navbar = () => {
         <button
           onClick={() => signOut({ callbackUrl: `${window.location.origin}/login` })}
           title="Cerrar sesión"
-          className="..."
+          className="inline-flex items-center gap-2 mt-4 md:mt-0 px-3 py-1.5 rounded text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition-colors"
         >
           <LogOut className="w-5 h-5" />
           <span className="hidden md:inline">Salir</span>
