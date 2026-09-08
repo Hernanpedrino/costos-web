@@ -42,6 +42,7 @@ enum EntidadAccion {
   Insumo
   Formula
   Usuario
+  Produccion
 }
 
 model RegistroAccion {
@@ -456,6 +457,47 @@ model CostoCategoria {
   registros CostoRegistro[]
 
   @@map("costo_categoria")
+}
+
+// ─── Planilla de producción ───────────────────────────────────────────────────
+
+model PlanillaProduccion {
+  id           Int       @id @default(autoincrement())
+  fecha        DateTime  @db.Date
+  estado       String    @default("borrador") @db.VarChar(12) // borrador | confirmada | procesada
+  observacion  String?   @db.Text
+  creadoPor    String    @db.VarChar(60)
+  creadoEn     DateTime  @default(now())
+  confirmadaEn DateTime?
+  procesadaEn  DateTime?
+
+  lineas PlanillaProduccionLinea[]
+
+  @@unique([fecha])
+  @@map("planilla_produccion")
+}
+
+model PlanillaProduccionLinea {
+  id         Int                @id @default(autoincrement())
+  planillaId Int
+  planilla   PlanillaProduccion @relation(fields: [planillaId], references: [id], onDelete: Cascade)
+
+  productoCod  String  @db.VarChar(20) // ESP4000003
+  productoDesc String  @db.VarChar(50) // snapshot al cargar (mismo largo que bej_articulos.descripcion)
+  lote         String  @db.VarChar(26) // DDMMAAAA normalizado
+  cantidad     Decimal @db.Decimal(15, 4)
+  formulaCod   String? @db.VarChar(32)
+  orden        Int     @default(0)
+
+  // Resultado del procesamiento en Bejerman
+  ordenBej    Int? // ProdOrdenes.orden
+  nroCompBej  String?   @db.VarChar(8) // ProdOrdenes.ord_NroComp
+  procesadaEn DateTime?
+  error       String?   @db.Text
+
+  @@index([planillaId])
+  @@index([productoCod])
+  @@map("planilla_produccion_lineas")
 }
 
 model CostoRegistro {

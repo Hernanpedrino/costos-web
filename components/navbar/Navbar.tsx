@@ -1,13 +1,114 @@
 'use client';
 
 import Link from "next/link";
-import { LogOut } from "lucide-react";
-import { signOut } from "next-auth/react";
-import { useSession } from "next-auth/react"
+import { usePathname } from "next/navigation";
+import { useState, useRef, useEffect } from "react";
+import { LogOut, ChevronDown } from "lucide-react";
+import { signOut, useSession } from "next-auth/react";
 
+// ─── Definición de los grupos ─────────────────────────────────────────────────
+
+interface Item {
+  href: string;
+  label: string;
+}
+
+interface Grupo {
+  label: string;
+  items: Item[];
+}
+
+const GRUPOS: Grupo[] = [
+  {
+    label: "Datos",
+    items: [
+      { href: "/insumos", label: "Insumos" },
+      { href: "/formulas", label: "Fórmulas" },
+    ],
+  },
+  {
+    label: "Análisis",
+    items: [
+      { href: "/estadisticas", label: "Estadísticas" },
+      { href: "/bejerman", label: "Estadísticas Bejerman" },
+      { href: "/informes", label: "Informes" },
+      { href: "/costos", label: "Costos" },
+    ],
+  },
+  {
+    label: "Operación",
+    items: [
+      { href: "/planificacion", label: "Planificación" },
+      { href: "/produccion", label: "Producción" },
+    ],
+  },
+];
+
+// ─── Dropdown ─────────────────────────────────────────────────────────────────
+
+function Dropdown({ grupo, pathname }: { grupo: Grupo; pathname: string }) {
+  const [abierto, setAbierto] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  const activo = grupo.items.some(i => pathname.startsWith(i.href));
+
+  // Cerrar al hacer click afuera o con Escape
+  useEffect(() => {
+    if (!abierto) return;
+
+    function onClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setAbierto(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setAbierto(false);
+    }
+
+    document.addEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [abierto]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setAbierto(v => !v)}
+        className={`mr-5 inline-flex items-center gap-1 hover:text-gray-900 ${
+          activo ? "text-gray-900 font-medium" : ""
+        }`}
+      >
+        {grupo.label}
+        <ChevronDown className={`w-4 h-4 transition-transform ${abierto ? "rotate-180" : ""}`} />
+      </button>
+
+      {abierto && (
+        <div className="absolute left-0 top-full z-50 mt-1 min-w-52 rounded-md border bg-white py-1 shadow-lg">
+          {grupo.items.map(item => (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={() => setAbierto(false)}
+              className={`block px-4 py-2 text-sm hover:bg-gray-100 ${
+                pathname.startsWith(item.href) ? "bg-gray-50 font-medium text-gray-900" : "text-gray-600"
+              }`}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Navbar ───────────────────────────────────────────────────────────────────
 
 export const Navbar = () => {
-  const { data: session } = useSession()
+  const { data: session } = useSession();
+  const pathname = usePathname();
+
   return (
     <header className="text-gray-600 body-font">
       <div className="container mx-auto flex flex-wrap p-5 flex-col md:flex-row items-center">
@@ -20,15 +121,17 @@ export const Navbar = () => {
         </Link>
 
         <nav className="md:mr-auto md:ml-4 md:py-1 md:pl-4 md:border-l md:border-gray-400 flex flex-wrap items-center text-base justify-center">
-          <Link href="/insumos" className="mr-5 hover:text-gray-900">Insumos</Link>
-          <Link href="/formulas" className="mr-5 hover:text-gray-900">Fórmulas</Link>
-          <Link href="/estadisticas" className="mr-5 hover:text-gray-900">Estadísticas</Link>
-          <Link href="/bejerman" className="mr-5 hover:text-gray-900">Estadísticas Bejerman</Link>
-          <Link href="/informes" className="mr-5 hover:text-gray-900">Informes</Link>
-          <Link href="/costos" className="mr-5 hover:text-gray-900">Costos</Link>
-          <Link href="/planificacion" className="mr-5 hover:text-gray-900">Planificacion</Link>
+          {GRUPOS.map(g => (
+            <Dropdown key={g.label} grupo={g} pathname={pathname} />
+          ))}
+
           {session?.user?.role === "ADMIN" && (
-            <Link href="/admin/usuarios" className="mr-5 hover:text-gray-900">
+            <Link
+              href="/admin/usuarios"
+              className={`mr-5 hover:text-gray-900 ${
+                pathname.startsWith("/admin/usuarios") ? "text-gray-900 font-medium" : ""
+              }`}
+            >
               Usuarios
             </Link>
           )}
