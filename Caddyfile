@@ -1,0 +1,30 @@
+# Caddyfile — reverse proxy con HTTPS para Costos El Chilo
+#
+# Termina TLS acá (certificado autofirmado, emitido por la CA local de Caddy,
+# ya que 192.168.1.191 es una IP privada y no se le puede pedir un certificado
+# público a Let's Encrypt) y reenvía todo a la app Next.js que corre en
+# localhost:3000 vía PM2.
+#
+# HTTP (puerto 80) redirige automáticamente a HTTPS.
+
+192.168.1.191 {
+	tls internal
+
+	# Descarga del certificado raíz para instalar en celulares/otras PCs:
+	# https://192.168.1.191/root.crt
+	handle /root.crt {
+		root * "C:/Users/Usuario/AppData/Roaming/Caddy/pki/authorities/local"
+		file_server
+	}
+
+	reverse_proxy localhost:3000
+
+	encode gzip
+
+	log {
+		output file logs/caddy-access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+	}
+}

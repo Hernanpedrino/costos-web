@@ -1,5 +1,6 @@
 import { getConsumoPrimasAction, getDemandaArticulosAction } from "@/actions/planificacion"
 import { PlanificacionClient } from "@/components/planificacion/PlanificacionClient"
+export const dynamic = "force-dynamic"
 
 
 export default async function PlanificacionPage() {

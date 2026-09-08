@@ -1,5 +1,6 @@
 import { getCostosPeriodoAction, getEvolucionCostosAction } from "@/actions/costos"
 import { CostosClient } from "@/components/costos/CostosClient"
+export const dynamic = "force-dynamic"
 
 
 function periodoActual() {

@@ -1,6 +1,7 @@
 // app/(pages)/bejerman/page.tsx
 import { getRankingArticulosAction } from "@/actions/bejerman"
 import { RankingClient } from "@/components/bejerman/RankingClient";
+export const dynamic = "force-dynamic"
 
 export default async function BejermanPage() {
   const data = await getRankingArticulosAction({

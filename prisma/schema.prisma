@@ -472,3 +472,28 @@ model CostoRegistro {
   @@index([periodo])
   @@map("costo_registro")
 }
+
+model ConversacionWhatsApp {
+  telefono          String   @id // ej "5493411234567", viene tal cual de Meta
+  nombreContacto    String?
+  estadoActual      String   @default("MENU_PRINCIPAL")
+  carritoActual     Json? // array de CarritoItem serializado
+  contexto          Json? // datos temporales de la conversación en curso
+  ultimaInteraccion DateTime @updatedAt
+  creadoEn          DateTime @default(now())
+
+  @@map("whatsapp_conversaciones")
+}
+
+// Opcional pero recomendado: log de mensajes para debug y auditoría
+model MensajeWhatsApp {
+  id        String   @id @default(cuid())
+  telefono  String
+  direccion String // "entrante" | "saliente"
+  tipo      String // "text" | "interactive" | "button" | etc.
+  contenido Json
+  timestamp DateTime @default(now())
+
+  @@index([telefono])
+  @@map("whatsapp_mensajes")
+}
