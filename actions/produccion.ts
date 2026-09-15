@@ -8,43 +8,48 @@ import { prisma } from "@/lib/prisma"
 import { auth } from "@/auth"
 import { registrarAccion } from "@/lib/registrarAccion"
 import { revalidatePath } from "next/cache"
+import { getBejermanPool, crearOPparaLinea } from "@/lib/bejerman-op"
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export interface LineaPlanilla {
-  id:          number
+  id: number
   productoCod: string
   productoDesc: string
-  lote:        string
-  cantidad:    number
-  formulaCod:  string | null
-  ordenBej:    number | null
-  nroCompBej:  string | null
+  lote: string
+  cantidad: number
+  formulaCod: string | null
+  ordenBej: number | null
+  nroCompBej: string | null
   procesadaEn: Date | null
-  error:       string | null
+  error: string | null
 }
 
 export interface PlanillaDia {
-  id:          number | null
-  fecha:       string // YYYY-MM-DD
-  estado:      string
+  id: number | null
+  fecha: string // YYYY-MM-DD
+  estado: string
   observacion: string | null
-  lineas:      LineaPlanilla[]
+  lineas: LineaPlanilla[]
 }
 
 export interface ProductoProducible {
-  codigo:        string
-  descripcion:   string
-  formula:       string
+  codigo: string
+  descripcion: string
+  formula: string
   cantProducida: number
 }
 
 export interface InsumoExplotado {
-  componente:  string
+  componente: string
   descripcion: string
-  cantidad:    number
+  cantidad: number
 }
-
+export interface ResultadoProceso {
+  ok: number
+  errores: { producto: string; error: string }[]
+  detalle: string[]
+}
 type ActionResult = { success: true } | { success: false; error: string }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -72,7 +77,7 @@ export async function getPlanillaAction(fechaISO?: string): Promise<PlanillaDia>
   const iso = fechaISO ?? hoyISO()
 
   const planilla = await prisma.planillaProduccion.findUnique({
-    where:   { fecha: fechaUTC(iso) },
+    where: { fecha: fechaUTC(iso) },
     include: { lineas: { orderBy: { orden: "asc" } } },
   })
 
@@ -81,21 +86,21 @@ export async function getPlanillaAction(fechaISO?: string): Promise<PlanillaDia>
   }
 
   return {
-    id:          planilla.id,
-    fecha:       iso,
-    estado:      planilla.estado,
+    id: planilla.id,
+    fecha: iso,
+    estado: planilla.estado,
     observacion: planilla.observacion,
     lineas: planilla.lineas.map(l => ({
-      id:          l.id,
+      id: l.id,
       productoCod: l.productoCod,
       productoDesc: l.productoDesc,
-      lote:        l.lote,
-      cantidad:    Number(l.cantidad),
-      formulaCod:  l.formulaCod,
-      ordenBej:    l.ordenBej,
-      nroCompBej:  l.nroCompBej,
+      lote: l.lote,
+      cantidad: Number(l.cantidad),
+      formulaCod: l.formulaCod,
+      ordenBej: l.ordenBej,
+      nroCompBej: l.nroCompBej,
       procesadaEn: l.procesadaEn,
-      error:       l.error,
+      error: l.error,
     })),
   }
 }
@@ -120,9 +125,9 @@ export async function buscarProductosAction(busqueda: string): Promise<ProductoP
   `
 
   return rows.map(r => ({
-    codigo:        r.codigo,
-    descripcion:   r.descripcion,
-    formula:       r.formula,
+    codigo: r.codigo,
+    descripcion: r.descripcion,
+    formula: r.formula,
     cantProducida: Number(r.cantProducida),
   }))
 }
@@ -150,25 +155,25 @@ export async function explotarFormulaAction(
   `
 
   return rows.map(r => ({
-    componente:  r.componente,
+    componente: r.componente,
     descripcion: r.descripcion ?? r.componente,
-    cantidad:    Number(r.cantComp) * (cantidad / Number(r.cantProducida)),
+    cantidad: Number(r.cantComp) * (cantidad / Number(r.cantProducida)),
   }))
 }
 
 // ─── Alta de línea ────────────────────────────────────────────────────────────
 
 export async function agregarLineaAction(input: {
-  fechaISO:     string
-  productoCod:  string
+  fechaISO: string
+  productoCod: string
   productoDesc: string
-  formulaCod:   string
-  loteISO:      string // del date picker
-  cantidad:     string
+  formulaCod: string
+  loteISO: string // del date picker
+  cantidad: string
 }): Promise<ActionResult> {
-  const session   = await auth()
+  const session = await auth()
   const usuarioId = session?.user?.id ?? ""
-  const usuario   = session?.user?.name ?? session?.user?.email ?? "desconocido"
+  const usuario = session?.user?.name ?? session?.user?.email ?? "desconocido"
 
   const cantidad = Number(input.cantidad.replace(",", "."))
   if (!Number.isFinite(cantidad) || cantidad <= 0) {
@@ -179,40 +184,43 @@ export async function agregarLineaAction(input: {
   }
 
   const fecha = fechaUTC(input.fechaISO)
-  const lote  = loteDesdeISO(input.loteISO)
+  const lote = loteDesdeISO(input.loteISO)
 
   try {
     const planilla = await prisma.planillaProduccion.upsert({
-      where:   { fecha },
-      create:  { fecha, creadoPor: usuario },
-      update:  {},
+      where: { fecha },
+      create: { fecha, creadoPor: usuario },
+      update: {},
       include: { lineas: { select: { orden: true } } },
     })
 
-    if (planilla.estado !== "borrador") {
-      return { success: false, error: "La planilla ya fue confirmada, no se puede modificar." }
-    }
-
     const maxOrden = planilla.lineas.reduce((m, l) => Math.max(m, l.orden), 0)
+
+    if (planilla.estado === "procesada") {
+      await prisma.planillaProduccion.update({
+        where: { id: planilla.id },
+        data: { estado: "confirmada", procesadaEn: null },
+      })
+    }
 
     const linea = await prisma.planillaProduccionLinea.create({
       data: {
-        planillaId:   planilla.id,
-        productoCod:  input.productoCod,
+        planillaId: planilla.id,
+        productoCod: input.productoCod,
         productoDesc: input.productoDesc,
-        formulaCod:   input.formulaCod,
+        formulaCod: input.formulaCod,
         lote,
         cantidad,
-        orden:        maxOrden + 1,
+        orden: maxOrden + 1,
       },
     })
 
     await registrarAccion({
       usuarioId,
-      accion:    "CREAR",
-      entidad:   "Produccion",
+      accion: "CREAR",
+      entidad: "Produccion",
       entidadId: String(linea.id),
-      detalle:   { fecha: input.fechaISO, producto: input.productoCod, lote, cantidad },
+      detalle: { fecha: input.fechaISO, producto: input.productoCod, lote, cantidad },
     })
 
     revalidatePath("/produccion")
@@ -225,24 +233,21 @@ export async function agregarLineaAction(input: {
 // ─── Edición de línea ─────────────────────────────────────────────────────────
 
 export async function editarLineaAction(input: {
-  id:       number
+  id: number
   loteISO?: string
   cantidad?: string
 }): Promise<ActionResult> {
-  const session   = await auth()
+  const session = await auth()
   const usuarioId = session?.user?.id ?? ""
 
   try {
     const linea = await prisma.planillaProduccionLinea.findUnique({
-      where:   { id: input.id },
+      where: { id: input.id },
       include: { planilla: true },
     })
     if (!linea) return { success: false, error: "No se encontró la línea." }
     if (linea.ordenBej) {
-      return { success: false, error: "La línea ya se procesó en Bejerman." }
-    }
-    if (linea.planilla.estado !== "borrador") {
-      return { success: false, error: "La planilla ya fue confirmada." }
+      return { success: false, error: "La línea ya se procesó en Bejerman, no se puede editar." }
     }
 
     const data: { lote?: string; cantidad?: number } = {}
@@ -259,10 +264,10 @@ export async function editarLineaAction(input: {
 
     await registrarAccion({
       usuarioId,
-      accion:    "EDITAR",
-      entidad:   "Produccion",
+      accion: "EDITAR",
+      entidad: "Produccion",
       entidadId: String(input.id),
-      detalle:   { ...data },
+      detalle: { ...data },
     })
 
     revalidatePath("/produccion")
@@ -275,30 +280,27 @@ export async function editarLineaAction(input: {
 // ─── Baja de línea ────────────────────────────────────────────────────────────
 
 export async function eliminarLineaAction(id: number): Promise<ActionResult> {
-  const session   = await auth()
+  const session = await auth()
   const usuarioId = session?.user?.id ?? ""
 
   try {
     const linea = await prisma.planillaProduccionLinea.findUnique({
-      where:   { id },
+      where: { id },
       include: { planilla: true },
     })
     if (!linea) return { success: false, error: "No se encontró la línea." }
     if (linea.ordenBej) {
       return { success: false, error: "La línea ya se procesó en Bejerman, no se puede eliminar." }
     }
-    if (linea.planilla.estado !== "borrador") {
-      return { success: false, error: "La planilla ya fue confirmada." }
-    }
 
     await prisma.planillaProduccionLinea.delete({ where: { id } })
 
     await registrarAccion({
       usuarioId,
-      accion:    "ELIMINAR",
-      entidad:   "Produccion",
+      accion: "ELIMINAR",
+      entidad: "Produccion",
       entidadId: String(id),
-      detalle:   { producto: linea.productoCod, lote: linea.lote, cantidad: Number(linea.cantidad) },
+      detalle: { producto: linea.productoCod, lote: linea.lote, cantidad: Number(linea.cantidad) },
     })
 
     revalidatePath("/produccion")
@@ -310,25 +312,28 @@ export async function eliminarLineaAction(id: number): Promise<ActionResult> {
 
 // ─── Confirmar / reabrir ──────────────────────────────────────────────────────
 
-/** Confirma la planilla: queda lista para que el script la procese en Bejerman */
+/**
+ * Marca la planilla como lista para procesar. Se puede repetir durante el día:
+ * las líneas se van cargando a medida que se envasa, y cada confirmación deja
+ * disponibles para el script las que todavía no tienen OP.
+ */
 export async function confirmarPlanillaAction(fechaISO: string): Promise<ActionResult> {
-  const session   = await auth()
+  const session = await auth()
   const usuarioId = session?.user?.id ?? ""
 
   try {
     const planilla = await prisma.planillaProduccion.findUnique({
-      where:   { fecha: fechaUTC(fechaISO) },
+      where: { fecha: fechaUTC(fechaISO) },
       include: { lineas: true },
     })
     if (!planilla) return { success: false, error: "No hay planilla para esa fecha." }
-    if (planilla.estado !== "borrador") {
-      return { success: false, error: "La planilla ya fue confirmada." }
-    }
-    if (planilla.lineas.length === 0) {
-      return { success: false, error: "La planilla no tiene líneas cargadas." }
+
+    const pendientes = planilla.lineas.filter(l => !l.ordenBej)
+    if (pendientes.length === 0) {
+      return { success: false, error: "No hay líneas pendientes de procesar." }
     }
 
-    const sinFormula = planilla.lineas.filter(l => !l.formulaCod)
+    const sinFormula = pendientes.filter(l => !l.formulaCod)
     if (sinFormula.length > 0) {
       return {
         success: false,
@@ -338,15 +343,15 @@ export async function confirmarPlanillaAction(fechaISO: string): Promise<ActionR
 
     await prisma.planillaProduccion.update({
       where: { id: planilla.id },
-      data:  { estado: "confirmada", confirmadaEn: new Date() },
+      data: { estado: "confirmada", confirmadaEn: new Date() },
     })
 
     await registrarAccion({
       usuarioId,
-      accion:    "EDITAR",
-      entidad:   "Produccion",
+      accion: "EDITAR",
+      entidad: "Produccion",
       entidadId: String(planilla.id),
-      detalle:   { evento: "confirmar", fecha: fechaISO, lineas: planilla.lineas.length },
+      detalle: { evento: "confirmar", fecha: fechaISO, lineas: pendientes.length },
     })
 
     revalidatePath("/produccion")
@@ -358,12 +363,12 @@ export async function confirmarPlanillaAction(fechaISO: string): Promise<ActionR
 
 /** Vuelve la planilla a borrador, solo si ninguna línea llegó a Bejerman */
 export async function reabrirPlanillaAction(fechaISO: string): Promise<ActionResult> {
-  const session   = await auth()
+  const session = await auth()
   const usuarioId = session?.user?.id ?? ""
 
   try {
     const planilla = await prisma.planillaProduccion.findUnique({
-      where:   { fecha: fechaUTC(fechaISO) },
+      where: { fecha: fechaUTC(fechaISO) },
       include: { lineas: true },
     })
     if (!planilla) return { success: false, error: "No hay planilla para esa fecha." }
@@ -378,20 +383,103 @@ export async function reabrirPlanillaAction(fechaISO: string): Promise<ActionRes
 
     await prisma.planillaProduccion.update({
       where: { id: planilla.id },
-      data:  { estado: "borrador", confirmadaEn: null },
+      data: { estado: "borrador", confirmadaEn: null },
     })
 
     await registrarAccion({
       usuarioId,
-      accion:    "EDITAR",
-      entidad:   "Produccion",
+      accion: "EDITAR",
+      entidad: "Produccion",
       entidadId: String(planilla.id),
-      detalle:   { evento: "reabrir", fecha: fechaISO },
+      detalle: { evento: "reabrir", fecha: fechaISO },
     })
 
     revalidatePath("/produccion")
     return { success: true }
   } catch (e: any) {
     return { success: false, error: e.message ?? "Error al reabrir la planilla." }
+  }
+
+}
+export async function procesarPlanillaAction(fechaISO: string): Promise<
+  { success: true; data: ResultadoProceso } | { success: false; error: string }
+> {
+  const session = await auth()
+  const usuarioId = session?.user?.id ?? ""
+
+  try {
+    const planilla = await prisma.planillaProduccion.findUnique({
+      where: { fecha: fechaUTC(fechaISO) },
+      include: { lineas: { orderBy: { orden: "asc" } } },
+    })
+    if (!planilla) return { success: false, error: "No hay planilla para esa fecha." }
+    if (planilla.estado === "borrador") {
+      return { success: false, error: "Confirmá la planilla antes de procesarla." }
+    }
+
+    const pendientes = planilla.lineas.filter(l => !l.ordenBej)
+    if (pendientes.length === 0) {
+      return { success: false, error: "No hay líneas pendientes de procesar." }
+    }
+
+    const pool = await getBejermanPool()
+    const detalle: string[] = []
+    const errores: { producto: string; error: string }[] = []
+    let ok = 0
+
+    for (const l of pendientes) {
+      try {
+        const r = await crearOPparaLinea(
+          pool,
+          {
+            id: l.id,
+            productoCod: l.productoCod,
+            productoDesc: l.productoDesc,
+            lote: l.lote,
+            cantidad: Number(l.cantidad),
+            formulaCod: l.formulaCod,
+          },
+          fechaISO,
+          { log: (m) => detalle.push(m) },
+        )
+
+        await prisma.planillaProduccionLinea.update({
+          where: { id: l.id },
+          data: {
+            ordenBej: r.orden,
+            nroCompBej: r.nroComp,
+            procesadaEn: new Date(),
+            error: null,
+          },
+        })
+        ok++
+      } catch (err: any) {
+        const msg = err.message ?? String(err)
+        errores.push({ producto: `${l.productoCod} — ${l.productoDesc}`, error: msg })
+        await prisma.planillaProduccionLinea.update({
+          where: { id: l.id }, data: { error: msg },
+        })
+      }
+    }
+
+    if (errores.length === 0) {
+      await prisma.planillaProduccion.update({
+        where: { id: planilla.id },
+        data: { estado: "procesada", procesadaEn: new Date() },
+      })
+    }
+
+    await registrarAccion({
+      usuarioId,
+      accion: "CREAR",
+      entidad: "Produccion",
+      entidadId: String(planilla.id),
+      detalle: { evento: "procesar", fecha: fechaISO, ok, errores: errores.length },
+    })
+
+    revalidatePath("/produccion")
+    return { success: true, data: { ok, errores, detalle } }
+  } catch (e: any) {
+    return { success: false, error: e.message ?? "Error al procesar la planilla." }
   }
 }

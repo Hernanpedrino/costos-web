@@ -219,11 +219,20 @@ export async function crearBPparaNP(
     // 7. Procesar items con FIFO por partidas
 
     let nReng = 1
-    const itemsProcessados: { sdv_ID: number; cantProcesada: number }[] = []
+    const itemsProcessados: { sdv_ID: number; cantProcesada: number; cantUM2: number }[] = []
 
     for (const item of items) {
       const cantAProcesar = Number(item.cantAProcesar)
       const llevaPart = item.sdv_LlevaPart
+
+      // Proporcion de la segunda unidad de medida, tomada de la propia fila
+      // de la NP. Sirve tanto para articulos de doble unidad (0.5, 25, etc.)
+      // como para los de unidad simple, donde sdv_CantUM2 es 0.
+      // Se usa la fila y no Articulos.art_FactorConv porque en renglones
+      // partidos la relacion real no coincide con el factor del maestro.
+      const cantUM1Orig = Number(item.sdv_CantUM1)
+      const ratioUM2 = cantUM1Orig > 0 ? Number(item.sdv_CantUM2) / cantUM1Orig : 0
+      const cantUM2 = cantAProcesar * ratioUM2
 
       if (!llevaPart) {
         // ── Artículo sin partida ─────────────────────────────────────────────
@@ -242,7 +251,7 @@ export async function crearBPparaNP(
           VALUES (
             'CANE', ' ', ${cmsID},
             '2', '${item.sdvart_CodGen}', '${item.sdvart_CodEle1?.trim() || ' '}', '${item.sdvart_CodEle2?.trim() || ' '}', '${item.sdvart_CodEle3?.trim() || ' '}',
-            '${item.sdvdep_Cod}', ${-cantAProcesar}, ${-cantAProcesar},
+            '${item.sdvdep_Cod}', ${-cantAProcesar}, ${-cantUM2},
             0, 0,
             ' ', ' ',
             0, ' ', 'N',
@@ -251,6 +260,21 @@ export async function crearBPparaNP(
           )
         `)
         const mstID = insertMst.recordset[0].mst_ID
+
+        // Descontar el saldo de Stock. Bejerman lo mantiene desde la aplicacion,
+        // no hay trigger: si solo insertamos en MovStock el saldo queda inflado.
+        await request.query(`
+          UPDATE Stock
+          SET stk_CantUM1   = stk_CantUM1 - ${cantAProcesar},
+              stk_CantUM2   = stk_CantUM2 - ${cantUM2},
+              stk_FecMod    = GETDATE(),
+              stkusu_Codigo = 'HER'
+          WHERE stkart_CodGen = '${item.sdvart_CodGen}'
+            AND LTRIM(RTRIM(ISNULL(stkart_CodEle1,''))) = '${item.sdvart_CodEle1?.trim() || ''}'
+            AND LTRIM(RTRIM(ISNULL(stkart_CodEle2,''))) = '${item.sdvart_CodEle2?.trim() || ''}'
+            AND LTRIM(RTRIM(ISNULL(stkart_CodEle3,''))) = '${item.sdvart_CodEle3?.trim() || ''}'
+            AND stkdep_Cod = '${item.sdvdep_Cod}'
+        `)
 
         await request.query(`
           INSERT INTO SegDetV (
@@ -286,22 +310,22 @@ export async function crearBPparaNP(
             ${nReng}, sdv_TipoIt,
             sdvart_CodGen, sdvart_CodEle1, sdvart_CodEle2, sdvart_CodEle3,
             sdv_Desc, sdvume_Cod1, sdvume_Desc1, sdvume_Cod2, sdvume_Desc2,
-            ${cantAProcesar}, ${cantAProcesar},
+            ${cantAProcesar}, ${cantUM2},
             sdv_CantDim1, sdv_CantDim2, sdv_CantDim3,
             0, 0,
-            ${cantAProcesar}, ${cantAProcesar},
+            ${cantAProcesar}, ${cantUM2},
             0, 0,
             0, 0,
             0, 0,
             0, 0,
             0, 0,
-            ${cantAProcesar}, ${cantAProcesar},
+            ${cantAProcesar}, ${cantUM2},
             0, 0,
             0, 0,
             sdv_PrecioUn, sdvart_TipoTasaVta, sdvtiv_Cod,
             0, sdv_ImpTot,
             ' ', sdv_Serie, '4',
-            0, 1, sdvdep_Cod, 1,
+            0, 1, sdvdep_Cod, sdv_FactorConv,
             0, sdv_PrCosto, ' ', 0,
             0, 'N', 0, 0,
             'CANE', ' ', ${mstID},
@@ -310,8 +334,8 @@ export async function crearBPparaNP(
           WHERE sdv_ID = ${item.sdv_ID}
         `)
 
-        console.log(`  Sin partida: ${item.sdvart_CodGen} | Cant: ${cantAProcesar} | mst_ID: ${mstID}`)
-        itemsProcessados.push({ sdv_ID: item.sdv_ID, cantProcesada: cantAProcesar })
+        console.log(`  Sin partida: ${item.sdvart_CodGen} | Cant: ${cantAProcesar} (UM2: ${cantUM2}) | mst_ID: ${mstID}`)
+        itemsProcessados.push({ sdv_ID: item.sdv_ID, cantProcesada: cantAProcesar, cantUM2 })
         nReng++
 
       } else {
@@ -331,13 +355,16 @@ export async function crearBPparaNP(
         const partidas = partidasResult.recordset
         let restante = cantAProcesar
         let cantProcesadaTotal = 0
+        let cantUM2Total = 0
 
         for (const partida of partidas) {
           if (restante <= 0) break
 
           const cantDeEstaPartida = Math.min(restante, Number(partida.stp_CantUM1))
+          const cantUM2DeEstaPartida = cantDeEstaPartida * ratioUM2
           restante -= cantDeEstaPartida
           cantProcesadaTotal += cantDeEstaPartida
+          cantUM2Total += cantUM2DeEstaPartida
 
           const insertMst = await request.query(`
             INSERT INTO MovStock (
@@ -354,7 +381,7 @@ export async function crearBPparaNP(
             VALUES (
               'CANE', ' ', ${cmsID},
               '2', '${item.sdvart_CodGen}', '${item.sdvart_CodEle1?.trim() || ' '}', '${item.sdvart_CodEle2?.trim() || ' '}', '${item.sdvart_CodEle3?.trim() || ' '}',
-              '${item.sdvdep_Cod}', ${-cantDeEstaPartida}, ${-cantDeEstaPartida},
+              '${item.sdvdep_Cod}', ${-cantDeEstaPartida}, ${-cantUM2DeEstaPartida},
               0, 0,
               '${partida.stp_Partida.trim()}', ' ',
               0, ' ', 'N',
@@ -363,6 +390,34 @@ export async function crearBPparaNP(
             )
           `)
           const mstID = insertMst.recordset[0].mst_ID
+
+          // Descontar saldo general y saldo de la partida consumida
+          await request.query(`
+            UPDATE Stock
+            SET stk_CantUM1   = stk_CantUM1 - ${cantDeEstaPartida},
+                stk_CantUM2   = stk_CantUM2 - ${cantUM2DeEstaPartida},
+                stk_FecMod    = GETDATE(),
+                stkusu_Codigo = 'HER'
+            WHERE stkart_CodGen = '${item.sdvart_CodGen}'
+              AND LTRIM(RTRIM(ISNULL(stkart_CodEle1,''))) = '${item.sdvart_CodEle1?.trim() || ''}'
+              AND LTRIM(RTRIM(ISNULL(stkart_CodEle2,''))) = '${item.sdvart_CodEle2?.trim() || ''}'
+              AND LTRIM(RTRIM(ISNULL(stkart_CodEle3,''))) = '${item.sdvart_CodEle3?.trim() || ''}'
+              AND stkdep_Cod = '${item.sdvdep_Cod}'
+          `)
+
+          await request.query(`
+            UPDATE StockPar
+            SET stp_CantUM1   = stp_CantUM1 - ${cantDeEstaPartida},
+                stp_CantUM2   = stp_CantUM2 - ${cantUM2DeEstaPartida},
+                stp_FecMod    = GETDATE(),
+                stpusu_Codigo = 'HER'
+            WHERE stpart_CodGen = '${item.sdvart_CodGen}'
+              AND LTRIM(RTRIM(ISNULL(stpart_CodEle1,''))) = '${item.sdvart_CodEle1?.trim() || ''}'
+              AND LTRIM(RTRIM(ISNULL(stpart_CodEle2,''))) = '${item.sdvart_CodEle2?.trim() || ''}'
+              AND LTRIM(RTRIM(ISNULL(stpart_CodEle3,''))) = '${item.sdvart_CodEle3?.trim() || ''}'
+              AND stpdep_Cod   = '${item.sdvdep_Cod}'
+              AND LTRIM(RTRIM(stp_Partida)) = '${partida.stp_Partida.trim()}'
+          `)
 
           await request.query(`
             INSERT INTO SegDetV (
@@ -398,22 +453,22 @@ export async function crearBPparaNP(
               ${nReng}, sdv_TipoIt,
               sdvart_CodGen, sdvart_CodEle1, sdvart_CodEle2, sdvart_CodEle3,
               sdv_Desc, sdvume_Cod1, sdvume_Desc1, sdvume_Cod2, sdvume_Desc2,
-              ${cantDeEstaPartida}, ${cantDeEstaPartida},
+              ${cantDeEstaPartida}, ${cantUM2DeEstaPartida},
               sdv_CantDim1, sdv_CantDim2, sdv_CantDim3,
               0, 0,
-              ${cantDeEstaPartida}, ${cantDeEstaPartida},
+              ${cantDeEstaPartida}, ${cantUM2DeEstaPartida},
               0, 0,
               0, 0,
               0, 0,
               0, 0,
               0, 0,
-              ${cantDeEstaPartida}, ${cantDeEstaPartida},
+              ${cantDeEstaPartida}, ${cantUM2DeEstaPartida},
               0, 0,
               0, 0,
               sdv_PrecioUn, sdvart_TipoTasaVta, sdvtiv_Cod,
               0, sdv_ImpTot,
               '${partida.stp_Partida.trim()}', sdv_Serie, '4',
-              0, 1, sdvdep_Cod, 1,
+              0, 1, sdvdep_Cod, sdv_FactorConv,
               0, sdv_PrCosto, ' ', 0,
               0, 'N', 1, 0,
               'CANE', ' ', ${mstID},
@@ -422,11 +477,11 @@ export async function crearBPparaNP(
             WHERE sdv_ID = ${item.sdv_ID}
           `)
 
-          console.log(`  Con partida: ${item.sdvart_CodGen} | Partida: ${partida.stp_Partida.trim()} | Cant: ${cantDeEstaPartida} | mst_ID: ${mstID}`)
+          console.log(`  Con partida: ${item.sdvart_CodGen} | Partida: ${partida.stp_Partida.trim()} | Cant: ${cantDeEstaPartida} (UM2: ${cantUM2DeEstaPartida}) | mst_ID: ${mstID}`)
           nReng++
         }
 
-        itemsProcessados.push({ sdv_ID: item.sdv_ID, cantProcesada: cantProcesadaTotal })
+        itemsProcessados.push({ sdv_ID: item.sdv_ID, cantProcesada: cantProcesadaTotal, cantUM2: cantUM2Total })
       }
     }
 
@@ -436,9 +491,9 @@ export async function crearBPparaNP(
         UPDATE SegDetV
         SET 
           sdv_CPendRtUM1 = sdv_CPendRtUM1 - ${proc.cantProcesada},
-          sdv_CPendRtUM2 = sdv_CPendRtUM2 - ${proc.cantProcesada},
+          sdv_CPendRtUM2 = sdv_CPendRtUM2 - ${proc.cantUM2},
           sdv_CPendFcUM1 = sdv_CPendFcUM1 - ${proc.cantProcesada},
-          sdv_CPendFcUM2 = sdv_CPendFcUM2 - ${proc.cantProcesada},
+          sdv_CPendFcUM2 = sdv_CPendFcUM2 - ${proc.cantUM2},
           sdv_CBonPendRtUM1 = 0,
           sdv_CBonPendRtUM2 = 0,
           sdv_CBonPendFcUM1 = 0,
