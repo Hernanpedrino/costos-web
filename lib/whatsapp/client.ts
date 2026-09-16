@@ -7,6 +7,24 @@ const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN!;
 
 const BASE_URL = `https://graph.facebook.com/${WHATSAPP_API_VERSION}/${PHONE_NUMBER_ID}/messages`;
 
+/**
+ * Normaliza números argentinos para el campo "to" de la API.
+ *
+ * Meta identifica los mensajes ENTRANTES de celulares argentinos con un "9"
+ * extra después del código de país (ej: 5493416688014), pero para ENVIAR
+ * mensajes hay que sacarlo (543416688014) — si no, tira el error 131030
+ * "Recipient phone number not in allowed list" aunque el número sí esté
+ * autorizado, porque la API lo trata como un string distinto.
+ * Referencia: es un comportamiento documentado y muy reportado para AR/MX/BR.
+ */
+function normalizarNumeroDestino(numero: string): string {
+  // Código de país Argentina: 54. El patrón es 54 9 <código de área> <número>.
+  if (numero.startsWith("549")) {
+    return "54" + numero.slice(3);
+  }
+  return numero;
+}
+
 async function callWhatsAppApi(body: Record<string, unknown>) {
   const res = await fetch(BASE_URL, {
     method: "POST",
@@ -30,7 +48,7 @@ async function callWhatsAppApi(body: Record<string, unknown>) {
 export async function sendTextMessage(to: string, text: string) {
   return callWhatsAppApi({
     messaging_product: "whatsapp",
-    to,
+    to: normalizarNumeroDestino(to),
     type: "text",
     text: { body: text, preview_url: false },
   });
@@ -48,7 +66,7 @@ export async function sendButtons(
 
   return callWhatsAppApi({
     messaging_product: "whatsapp",
-    to,
+    to: normalizarNumeroDestino(to),
     type: "interactive",
     interactive: {
       type: "button",
@@ -72,7 +90,7 @@ export async function sendList(
 ) {
   return callWhatsAppApi({
     messaging_product: "whatsapp",
-    to,
+    to: normalizarNumeroDestino(to),
     type: "interactive",
     interactive: {
       type: "list",
