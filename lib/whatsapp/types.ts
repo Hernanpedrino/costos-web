@@ -32,6 +32,8 @@ export interface WhatsAppMessage {
   timestamp: string;
   type: "text" | "interactive" | "button" | "image" | "document" | "audio" | "location";
   text?: { body: string };
+  /** Ubicación compartida (📎 → Ubicación, o el botón de location_request_message). */
+  location?: { latitude: number; longitude: number; name?: string; address?: string };
   interactive?: {
     type: "button_reply" | "list_reply";
     button_reply?: { id: string; title: string };
@@ -61,6 +63,8 @@ export type ConversationState =
   | "ESPERANDO_DIRECCION"
   | "ESPERANDO_CONFIRMACION"
   | "CONSULTA_LIBRE"
+  | "ESPERANDO_ASUNTO_ATENCION" // "Hablar con persona": eligiendo el tema
+  | "ESPERANDO_MENSAJE_ATENCION" // "Hablar con persona": falta escribir la consulta
   | "ATENCION_PERSONAL"; // pidió hablar con una persona: el bot no responde texto
 
 export interface CarritoItem {

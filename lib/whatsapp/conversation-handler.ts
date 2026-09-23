@@ -1,5 +1,5 @@
 // lib/whatsapp/conversation-handler.ts
-import { sendTextMessage, sendButtons, sendList, markAsRead } from "./client";
+import { sendTextMessage, sendButtons, sendList, sendLocationRequest, markAsRead } from "./client";
 import {
   buscarArticulos,
   claveVariante,
@@ -21,7 +21,14 @@ import type { WhatsAppMessage, CarritoItem } from "./types";
 type DatosEntrega =
   | { tipo: "RETIRO"; nombrePersona?: string }
   | { tipo: "TRANSPORTE"; nombrePersona?: string }
-  | { tipo: "REPARTO"; nombreLocal?: string; nombrePersona?: string; direccion?: string };
+  | {
+      tipo: "REPARTO";
+      nombreLocal?: string;
+      nombrePersona?: string;
+      direccion?: string;
+      /** Si la mandó desde el mapa de WhatsApp. */
+      ubicacion?: { lat: number; lng: number };
+    };
 
 /**
  * Punto de entrada único para cualquier mensaje entrante.
@@ -51,12 +58,22 @@ export async function handleIncomingMessage(message: WhatsAppMessage, nombreCont
     return;
   }
 
+  // --- Ubicación del mapa ---
+  if (message.type === "location" && message.location) {
+    await manejarUbicacion(telefono, message.location, sesion);
+    return;
+  }
+
   // Si pidió hablar con una persona, lo que mande (audios incluidos) es para el equipo.
   if (sesion.estadoActual === "ATENCION_PERSONAL") {
     await avisarAtencion(
       sesion,
       `Mandó un mensaje de tipo "${message.type}" que no se puede reenviar por mail. Pedile que lo escriba cuando lo contactes.`
     );
+    return;
+  }
+  if (sesion.estadoActual === "ESPERANDO_MENSAJE_ATENCION" || sesion.estadoActual === "ESPERANDO_ASUNTO_ATENCION") {
+    await sendTextMessage(telefono, "Por ahora no puedo escuchar audios ni ver imágenes 🙂 Escribime tu consulta en un mensaje.");
     return;
   }
 
@@ -188,8 +205,13 @@ function textoEntrega(datos: DatosEntrega): string {
     `Envío a: ${datos.nombreLocal}\n` +
     `Att: ${datos.nombrePersona}\n` +
     `Dirección: ${datos.direccion}\n` +
+    (datos.ubicacion ? `Mapa: ${linkMapa(datos.ubicacion)}\n` : "") +
     `Reparto estimado: ${etiqueta}`
   );
+}
+
+function linkMapa({ lat, lng }: { lat: number; lng: number }): string {
+  return `https://maps.google.com/?q=${lat},${lng}`;
 }
 
 /** Completa los campos de variante que no traen los ítems de sesiones viejas. */
@@ -327,6 +349,14 @@ async function manejarTextoLibre(telefono: string, texto: string, sesion: Sesion
   // contesta. Se reenvía el mensaje original, con saludo incluido.
   if (sesion.estadoActual === "ATENCION_PERSONAL") {
     await avisarAtencion(sesion, `Escribió:\n\n${texto}`);
+    return;
+  }
+
+  // "Hablar con persona": la consulta (con o sin tema elegido) se manda
+  // entera, saludo incluido. Escribir sin elegir tema también vale.
+  if (sesion.estadoActual === "ESPERANDO_MENSAJE_ATENCION" || sesion.estadoActual === "ESPERANDO_ASUNTO_ATENCION") {
+    const asunto = (sesion.contexto.asuntoAtencion as string | undefined) ?? "Consulta";
+    await derivarAPersona(telefono, sesion, asunto, texto);
     return;
   }
 
@@ -1381,7 +1411,18 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
   }
 
   if (idOpcion === "HABLAR_PERSONA") {
-    await derivarAPersona(telefono, sesion);
+    await pedirAsuntoAtencion(telefono, sesion);
+    return;
+  }
+
+  // Tema elegido para "Hablar con persona": "ASUNTO|<clave>"
+  if (idOpcion.startsWith("ASUNTO|")) {
+    const tema = TEMAS_ATENCION.find((t) => t.id === idOpcion.replace("ASUNTO|", "")) ?? TEMAS_ATENCION.at(-1)!;
+    await actualizarSesion(telefono, {
+      estadoActual: "ESPERANDO_MENSAJE_ATENCION",
+      contexto: { ...contextoBase(sesion), asuntoAtencion: tema.titulo },
+    });
+    await sendTextMessage(telefono, `${tema.pedido}\n\nSi querés volver al menú, escribí *menu*.`);
     return;
   }
 
@@ -1657,12 +1698,13 @@ const MAIL_ATENCION = process.env.MAIL_ATENCION ?? "hernanpedrino@elchilo.com";
  * así Gmail agrupa los mensajes de un cliente en un solo hilo. Si el mail
  * falla, se loguea y el bot sigue.
  */
-async function avisarAtencion(sesion: Sesion, cuerpo: string) {
+async function avisarAtencion(sesion: Sesion, cuerpo: string, asunto?: string) {
   const nombre = sesion.nombreContacto ?? "Sin nombre";
+  const tema = asunto ?? (sesion.contexto.asuntoAtencion as string | undefined);
   try {
     await enviarMail({
       to: MAIL_ATENCION,
-      subject: `Atención WhatsApp — ${nombre} (${sesion.telefono})`,
+      subject: `Atención WhatsApp — ${tema ? `${tema} — ` : ""}${nombre} (${sesion.telefono})`,
       text: `${nombre} (+${sesion.telefono})\n\n${cuerpo}\n\nEscribirle por WhatsApp: https://wa.me/${sesion.telefono}`,
     });
   } catch (err) {
@@ -1670,31 +1712,127 @@ async function avisarAtencion(sesion: Sesion, cuerpo: string) {
   }
 }
 
+/** Temas de "Hablar con persona": el título va en el asunto del mail. */
+const TEMAS_ATENCION = [
+  {
+    id: "PEDIDO",
+    titulo: "Estado de mi pedido",
+    descripcion: "¿Salió? ¿Cuándo llega?",
+    pedido: "Contanos a nombre de quién está el pedido y, si lo tenés, el número o la fecha en que lo hiciste.",
+  },
+  {
+    id: "REPARACION",
+    titulo: "Reparación / service",
+    descripcion: "Una máquina que dejaste para reparar",
+    pedido: "Contanos qué máquina dejaste y a nombre de quién, así la buscamos.",
+  },
+  {
+    id: "PRESUPUESTO",
+    titulo: "Precios o presupuesto",
+    descripcion: "Cotizar productos o cantidades grandes",
+    pedido: "Contanos qué productos y cantidades necesitás.",
+  },
+  {
+    id: "RECLAMO",
+    titulo: "Reclamo o devolución",
+    descripcion: "Algo no llegó bien",
+    pedido: "Contanos qué pasó y con qué pedido.",
+  },
+  {
+    id: "OTRO",
+    titulo: "Otro tema",
+    descripcion: "",
+    pedido: "Contanos en un mensaje qué necesitás.",
+  },
+];
+
 /**
- * Deja la conversación en manos del equipo: el bot no responde más texto
- * hasta que el cliente escriba "menu" (lo que escriba se reenvía por mail).
- * El carrito se conserva.
+ * Primer paso de "Hablar con persona": el tema. Así el equipo recibe la
+ * consulta entera en un solo mail, en vez de un aviso sin contexto.
  */
-async function derivarAPersona(telefono: string, sesion: Sesion) {
-  await actualizarSesion(telefono, { estadoActual: "ATENCION_PERSONAL", contexto: contextoBase(sesion) });
+async function pedirAsuntoAtencion(telefono: string, sesion: Sesion) {
+  await actualizarSesion(telefono, { estadoActual: "ESPERANDO_ASUNTO_ATENCION", contexto: contextoBase(sesion) });
+  await sendList(
+    telefono,
+    "¿Sobre qué querés hablar con el equipo? Elegí un tema o escribí directamente tu consulta.",
+    "Elegir tema",
+    [
+      {
+        title: "Temas",
+        rows: TEMAS_ATENCION.map((t) => ({
+          id: `ASUNTO|${t.id}`,
+          title: t.titulo,
+          ...(t.descripcion && { description: t.descripcion }),
+        })),
+      },
+    ]
+  );
+}
+
+/**
+ * Deja la conversación en manos del equipo con la consulta ya escrita: manda
+ * un mail con el tema, el mensaje y el pedido en curso. Después el bot no
+ * responde más texto hasta que el cliente escriba "menu" (lo que escriba se
+ * reenvía por mail, en el mismo hilo). El carrito se conserva.
+ */
+async function derivarAPersona(telefono: string, sesion: Sesion, asunto: string, mensaje: string) {
+  await actualizarSesion(telefono, {
+    estadoActual: "ATENCION_PERSONAL",
+    contexto: { ...contextoBase(sesion), asuntoAtencion: asunto },
+  });
 
   const datosEntrega = obtenerDatosEntrega(sesion);
   const pedido =
     sesion.carritoActual.length > 0
-      ? `Pedido en curso:\n${lineasCarrito(sesion.carritoActual)}\nTotal: ${textoTotal(sesion.carritoActual)}`
-      : "Sin productos cargados.";
+      ? `\n\nPedido en curso en el chat:\n${lineasCarrito(sesion.carritoActual)}\nTotal: ${textoTotal(sesion.carritoActual)}`
+      : "";
   await avisarAtencion(
     sesion,
-    `Pidió hablar con una persona.\n\n${pedido}` +
-      (entregaCompleta(datosEntrega) ? `\n\nEntrega:\n${textoEntrega(datosEntrega)}` : "")
+    `Tema: ${asunto}\n\nConsulta:\n${mensaje}${pedido}` +
+      (entregaCompleta(datosEntrega) ? `\n\nEntrega:\n${textoEntrega(datosEntrega)}` : ""),
+    asunto
   );
 
   await sendTextMessage(
     telefono,
-    `Listo, le avisamos al equipo. Alguien se va a comunicar con vos por WhatsApp (puede ser desde otro número). ` +
-      `Mientras tanto, podés dejarnos tu consulta escrita acá.\n\n` +
+    `Listo, le pasamos tu consulta al equipo. Alguien se va a comunicar con vos por WhatsApp (puede ser desde otro número). ` +
+      `Si querés agregar algo más, escribilo acá.\n\n` +
       `Horario de atención: ${INFO_RETIRO.horario}.\n\n` +
       `Si querés volver al asistente automático, escribí *menu*.`
+  );
+}
+
+/**
+ * Ubicación del mapa. Pedida como dirección de reparto → se guarda con el
+ * link al mapa; en atención personal → se reenvía por mail; en otro momento,
+ * se aclara para qué sirve.
+ */
+async function manejarUbicacion(
+  telefono: string,
+  location: NonNullable<WhatsAppMessage["location"]>,
+  sesion: Sesion
+) {
+  const ubicacion = { lat: location.latitude, lng: location.longitude };
+  const direccionMapa = [location.name, location.address].filter(Boolean).join(" — ");
+
+  if (sesion.estadoActual === "ESPERANDO_DIRECCION") {
+    const datosEntrega = {
+      ...(obtenerDatosEntrega(sesion) as object),
+      direccion: direccionMapa || "Ubicación enviada desde el mapa",
+      ubicacion,
+    } as DatosEntrega;
+    await continuarTrasEntrega(telefono, sesion, datosEntrega);
+    return;
+  }
+
+  if (sesion.estadoActual === "ATENCION_PERSONAL") {
+    await avisarAtencion(sesion, `Mandó una ubicación${direccionMapa ? ` (${direccionMapa})` : ""}: ${linkMapa(ubicacion)}`);
+    return;
+  }
+
+  await sendTextMessage(
+    telefono,
+    `Recibí tu ubicación 📍 La uso como dirección cuando hagas un pedido con envío por reparto. ${AYUDA_MENU}`
   );
 }
 
@@ -1714,7 +1852,19 @@ async function procesarNombrePersona(telefono: string, texto: string, sesion: Se
 
   if (datosEntrega.tipo === "REPARTO") {
     await actualizarSesion(telefono, { estadoActual: "ESPERANDO_DIRECCION", contexto: { datosEntrega } });
-    await sendTextMessage(telefono, "¿Cuál es la dirección de entrega?");
+    try {
+      await sendLocationRequest(
+        telefono,
+        "¿Cuál es la dirección de entrega? Tocá *Enviar ubicación* para marcarla en el mapa, o escribila (calle, número y localidad)."
+      );
+    } catch (err) {
+      // Si Meta rechaza el botón de ubicación, se pide igual por texto.
+      console.error("[whatsapp] No se pudo pedir la ubicación con botón:", err);
+      await sendTextMessage(
+        telefono,
+        "¿Cuál es la dirección de entrega? Escribila (calle, número y localidad) o mandá tu ubicación desde 📎 → Ubicación."
+      );
+    }
     return;
   }
 

@@ -7,8 +7,9 @@
  * de la API (largos, cantidad de botones/filas, ids repetidos) se validan
  * igual que en producción.
  *
- * Cada argumento es un paso: texto libre, o `#ID` para "tocar" un botón o
- * fila de lista (los ids aparecen impresos al lado de cada opción).
+ * Cada argumento es un paso: texto libre, `#ID` para "tocar" un botón o
+ * fila de lista (los ids aparecen impresos al lado de cada opción), o
+ * `@lat,lng[,dirección]` para mandar una ubicación del mapa.
  *
  *   npx tsx --tsconfig tsconfig.json scripts/simular-chat.ts "hola" "#HACER_PEDIDO" "#RETIRO" "Juan" "hoja de sierra"
  *   npx tsx --tsconfig tsconfig.json scripts/simular-chat.ts "Hola de sierra"
@@ -50,6 +51,12 @@ function armarMensaje(paso: string): WhatsAppMessage {
     // El handler resuelve igual button_reply y list_reply; mandamos list_reply
     // (el título no se usa para decidir nada).
     return { ...base, type: "interactive", interactive: { type: "list_reply", list_reply: { id, title: id } } }
+  }
+  // Ubicación compartida: "@lat,lng" o "@lat,lng,dirección"
+  const ubicacion = paso.match(/^@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)(?:,(.+))?$/)
+  if (ubicacion) {
+    const [, lat, lng, address] = ubicacion
+    return { ...base, type: "location", location: { latitude: Number(lat), longitude: Number(lng), address } }
   }
   return { ...base, type: "text", text: { body: paso } }
 }

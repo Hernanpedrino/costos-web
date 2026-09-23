@@ -215,6 +215,30 @@ export async function sendList(
   );
 }
 
+/**
+ * Pide la ubicación con el botón nativo "Enviar ubicación" de WhatsApp
+ * (location_request_message). En WhatsApp Web el botón puede no andar: el
+ * texto tiene que dejar claro que también se puede escribir.
+ */
+export async function sendLocationRequest(to: string, bodyText: string) {
+  validarLargo(bodyText, LARGO_CUERPO_INTERACTIVO, "el cuerpo del pedido de ubicación");
+
+  return callWhatsAppApi(
+    {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: normalizarNumeroDestino(to),
+      type: "interactive",
+      interactive: {
+        type: "location_request_message",
+        body: { text: bodyText },
+        action: { name: "send_location" },
+      },
+    },
+    to
+  );
+}
+
 /** Marca un mensaje entrante como leído (opcional, mejora UX). No se registra: no es un mensaje. */
 export async function markAsRead(messageId: string) {
   if (modoSimulacion()) return { success: true, simulado: true };
@@ -229,7 +253,7 @@ export async function markAsRead(messageId: string) {
 // ---- Simulación ----
 
 interface InteractivoSimulado {
-  type: "button" | "list";
+  type: "button" | "list" | "location_request_message";
   body: { text: string };
   action: {
     buttons?: { reply: { id: string; title: string } }[];
@@ -250,6 +274,8 @@ function imprimirSimulado(body: Record<string, unknown>) {
     lineas.push(...sangrar(interactive.body.text), "│");
     if (interactive.type === "button") {
       for (const b of interactive.action.buttons ?? []) lineas.push(`│ [ ${b.reply.title} ]  #${b.reply.id}`);
+    } else if (interactive.type === "location_request_message") {
+      lineas.push("│ [ 📍 Enviar ubicación ]  (en simular-chat: @lat,lng[,dirección])");
     } else {
       lineas.push(`│ ≡ ${interactive.action.button}`);
       for (const s of interactive.action.sections ?? []) {
