@@ -1980,9 +1980,13 @@ const ZONA_REPARTO = [
     radioKm: 5,
     patron: /\bgalvez\b|\bvgg\b/,
   },
+  { id: "PER", nombre: "Pérez", lat: -32.998, lng: -60.77, radioKm: 4, patron: /\bperez\b/ },
+  // Oficialmente "Zavalla"; también se escribe "Zaballa".
+  { id: "ZAV", nombre: "Zavalla", lat: -33.02, lng: -60.883, radioKm: 3, patron: /\bza[vb]alla\b/ },
 ];
 
-const LOCALIDADES_REPARTO = "Rosario, Funes, Roldán, Granadero Baigorria y Villa Gobernador Gálvez";
+const LOCALIDADES_REPARTO =
+  "Rosario, Funes, Roldán, Granadero Baigorria, Villa Gobernador Gálvez, Pérez y Zavalla";
 
 /** Localidad de la zona mencionada en un texto ("Colón 1357, Rosario"), o null. */
 function localidadEnTexto(texto: string): string | null {
