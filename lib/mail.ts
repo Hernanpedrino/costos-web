@@ -29,6 +29,12 @@ function getTransporter(): Transporter | null {
  * que lo dispara.
  */
 export async function enviarMail({ to, subject, text }: { to: string; subject: string; text: string }): Promise<void> {
+  // Simulación del chatbot (scripts/simular-chat.ts): se muestra, no se manda.
+  if (process.env.WHATSAPP_SIMULAR === "1") {
+    console.log(`┌─ MAIL SIMULADO (no se envió)\n│ Para: ${to}\n│ Asunto: ${subject}\n│\n${text.split("\n").map((l) => `│ ${l}`).join("\n")}\n└─`)
+    return
+  }
+
   const transporter = getTransporter()
   if (!transporter) {
     console.warn(`[mail] SMTP sin configurar — no se envió "${subject}" a ${to}`)
