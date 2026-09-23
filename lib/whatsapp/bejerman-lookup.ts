@@ -94,6 +94,22 @@ export async function consultarPrecio(
 }
 
 /**
+ * Precios de varios artículos en una sola consulta (para mostrarlos en la
+ * lista de resultados de búsqueda). Los que no están en la lista no vienen.
+ */
+export async function consultarPrecios(
+  codigos: string[],
+  listaCod: string = LISTA_PRECIO_DEFAULT
+): Promise<Map<string, number>> {
+  const registros = await prisma.bejListaPrecio.findMany({
+    where: { listaCod, artCodigo: { in: codigos } },
+    select: { artCodigo: true, precio: true },
+  });
+
+  return new Map(registros.map((r) => [r.artCodigo, r.precio.toNumber()]));
+}
+
+/**
  * Trae la descripción de un artículo por código (útil para confirmar
  * al usuario qué artículo se resolvió antes de agregarlo al carrito).
  */

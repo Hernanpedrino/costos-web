@@ -59,7 +59,8 @@ export type ConversationState =
   | "ESPERANDO_NOMBRE_PERSONA"
   | "ESPERANDO_DIRECCION"
   | "ESPERANDO_CONFIRMACION"
-  | "CONSULTA_LIBRE";
+  | "CONSULTA_LIBRE"
+  | "ATENCION_PERSONAL"; // pidió hablar con una persona: el bot no responde texto
 
 export interface CarritoItem {
   codigoArticulo: string;
