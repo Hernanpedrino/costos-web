@@ -1,13 +1,19 @@
 // components/home/ActividadCards.tsx
+"use client"
+
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import type { ActividadItem } from "@/actions/actividad"
 import { PackagePlus, PackageMinus, Pencil, UserRound } from "lucide-react"
 
+// Cada cuánto se recalcula "Hace X min" y se piden las acciones nuevas al server
+const INTERVALO_MS = 60_000
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const formatearFecha = (iso: string) => {
+const formatearFecha = (iso: string, ahora: number) => {
   const fecha = new Date(iso)
-  const ahora = new Date()
-  const diffMin  = Math.floor((ahora.getTime() - fecha.getTime()) / 60000)
+  const diffMin  = Math.floor((ahora - fecha.getTime()) / 60000)
   const diffHs   = Math.floor(diffMin / 60)
   const diffDias = Math.floor(diffHs / 24)
 
@@ -18,16 +24,6 @@ const formatearFecha = (iso: string) => {
   return new Intl.DateTimeFormat("es-AR", {
     day: "2-digit", month: "2-digit", year: "numeric",
   }).format(fecha)
-}
-
-const textoAccion = (accion: string, entidad: string, detalle: string) => {
-  const e = entidad === "Formula" ? "fórmula" : "insumo"
-  switch (accion) {
-    case "CREAR":    return { verbo: "Creó",     resto: `el ${e}` }
-    case "EDITAR":   return { verbo: "Modificó", resto: `el ${e}` }
-    case "ELIMINAR": return { verbo: "Eliminó",  resto: `el ${e}` }
-    default:         return { verbo: "Actualizó", resto: `el ${e}` }
-  }
 }
 
 const coloresAccion: Record<string, { bg: string; icon: string; border: string }> = {
@@ -50,6 +46,20 @@ const IconoAccion = ({ accion }: { accion: string }) => {
 // ─── Componente ───────────────────────────────────────────────────────────────
 
 export function ActividadCards({ items }: { items: ActividadItem[] }) {
+  const router = useRouter()
+  const [ahora, setAhora] = useState(() => Date.now())
+
+  // Refresca los tiempos relativos y vuelve a pedir la página al server
+  // (router.refresh no pierde el estado del cliente) para traer acciones nuevas.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.hidden) return // nadie lo está mirando
+      setAhora(Date.now())
+      router.refresh()
+    }, INTERVALO_MS)
+    return () => clearInterval(id)
+  }, [router])
+
   if (items.length === 0) {
     return (
       <p className="text-sm text-muted-foreground text-center mt-4">
@@ -61,7 +71,6 @@ export function ActividadCards({ items }: { items: ActividadItem[] }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
       {items.map((item) => {
-        const { verbo, resto } = textoAccion(item.accion, item.entidad, item.detalle)
         const colores = coloresAccion[item.accion] ?? { bg: "", icon: "", border: "border-gray-200" }
 
         return (
@@ -72,8 +81,8 @@ export function ActividadCards({ items }: { items: ActividadItem[] }) {
             {/* Icono + tiempo */}
             <div className="flex items-center justify-between">
               <IconoAccion accion={item.accion} />
-              <span className="text-xs text-muted-foreground">
-                {formatearFecha(item.createdAt)}
+              <span className="text-xs text-muted-foreground" suppressHydrationWarning>
+                {formatearFecha(item.createdAt, ahora)}
               </span>
             </div>
 
@@ -83,7 +92,7 @@ export function ActividadCards({ items }: { items: ActividadItem[] }) {
                 {item.usuario}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {verbo} {resto}
+                {item.titulo}
               </p>
               <p className="text-xs font-medium text-gray-700 mt-1 truncate" title={item.detalle}>
                 {item.detalle || "—"}
