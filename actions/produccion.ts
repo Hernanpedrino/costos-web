@@ -9,6 +9,7 @@ import { auth } from "@/auth"
 import { registrarAccion } from "@/lib/registrarAccion"
 import { revalidatePath } from "next/cache"
 import { getBejermanPool, crearOPparaLinea } from "@/lib/bejerman-op"
+import { encolarOP } from "@/lib/cola-op"
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -405,8 +406,17 @@ export async function procesarPlanillaAction(fechaISO: string): Promise<
   { success: true; data: ResultadoProceso } | { success: false; error: string }
 > {
   const session = await auth()
-  const usuarioId = session?.user?.id ?? ""
+  const usuarioId = session?.user?.id
+  if (!usuarioId) return { success: false, error: "Tu sesión venció. Volvé a ingresar." }
 
+  // Si otro usuario está procesando, esperamos su turno. La planilla se lee
+  // recién adentro de la cola, así vemos las líneas que el otro ya procesó.
+  return encolarOP(() => procesarPlanilla(fechaISO, usuarioId))
+}
+
+async function procesarPlanilla(fechaISO: string, usuarioId: string): Promise<
+  { success: true; data: ResultadoProceso } | { success: false; error: string }
+> {
   try {
     const planilla = await prisma.planillaProduccion.findUnique({
       where: { fecha: fechaUTC(fechaISO) },
@@ -428,6 +438,12 @@ export async function procesarPlanillaAction(fechaISO: string): Promise<
     let ok = 0
 
     for (const l of pendientes) {
+      // Puede haberla procesado scripts/crear-op.ts mientras tanto
+      const actual = await prisma.planillaProduccionLinea.findUnique({
+        where: { id: l.id }, select: { ordenBej: true },
+      })
+      if (!actual || actual.ordenBej) continue
+
       try {
         const r = await crearOPparaLinea(
           pool,
@@ -460,6 +476,11 @@ export async function procesarPlanillaAction(fechaISO: string): Promise<
           where: { id: l.id }, data: { error: msg },
         })
       }
+    }
+
+    if (ok === 0 && errores.length === 0) {
+      revalidatePath("/produccion")
+      return { success: false, error: "Otro usuario ya procesó estas líneas mientras esperabas." }
     }
 
     if (errores.length === 0) {

@@ -78,6 +78,8 @@ export async function crearBPparaNP(
 
     // 3. Insertar CabMovS
     const insertCms = await request.query(`
+      DECLARE @idsCms TABLE (cms_ID INT)
+
       INSERT INTO CabMovS (
         cmsemp_Codigo, cmssuc_Cod, cms_FComp,
         cms_Circuito, cmstco_Cod, cmsptr_Cod, cms_CodPvt,
@@ -85,7 +87,7 @@ export async function crearBPparaNP(
         cms_CodApe, cms_FecMod, cms_Convert,
         cms_FContab, cms_PasadoCG, cmsusu_Codigo
       )
-      OUTPUT INSERTED.cms_ID
+      OUTPUT INSERTED.cms_ID INTO @idsCms
       VALUES (
         'CANE', ' ', '${fechaStr}',
         'V', 'BP', '7', '00006',
@@ -93,12 +95,16 @@ export async function crearBPparaNP(
         ' ', GETDATE(), ' ',
         '${fechaStr}', 'C', 'HER'
       )
+
+      SELECT cms_ID FROM @idsCms
     `)
     const cmsID = insertCms.recordset[0].cms_ID
     console.log(`  CabMovS ID: ${cmsID}`)
 
     // 4. Insertar SegCabV (BP)
     const insertScv = await request.query(`
+      DECLARE @idsScv TABLE (scv_ID INT)
+
       INSERT INTO SegCabV (
         scvemp_Codigo, scvsuc_Cod, scvptr_Cod, scvpre_Cod,
         scv_OrigenComp, scv_FContab, scv_FDDJJ, scv_IncluDDJJ,
@@ -123,7 +129,7 @@ export async function crearBPparaNP(
         scvdlp_Cod, scvcvt_Cod, scvven_Cod, scvdep_Cod,
         scv_CantHojas, scvpai_Cod
       )
-      OUTPUT INSERTED.scv_ID
+      OUTPUT INSERTED.scv_ID INTO @idsScv
       SELECT
         scvemp_Codigo, scvsuc_Cod, '7', '1',
         'R', '${fechaStr}', '${fechaStr}', scv_IncluDDJJ,
@@ -149,6 +155,8 @@ export async function crearBPparaNP(
         0, 'ARG'
       FROM SegCabV
       WHERE scv_ID = ${scvID}
+
+      SELECT scv_ID FROM @idsScv
     `)
     const newScvID = insertScv.recordset[0].scv_ID
     console.log(`  SegCabV ID: ${newScvID}`)
@@ -237,6 +245,8 @@ export async function crearBPparaNP(
       if (!llevaPart) {
         // ── Artículo sin partida ─────────────────────────────────────────────
         const insertMst = await request.query(`
+          DECLARE @idsMst TABLE (mst_ID INT)
+
           INSERT INTO MovStock (
             mstemp_Codigo, mstsuc_Cod, mstcms_ID,
             mstart_Tipo, mstart_CodGen, mstart_CodEle1, mstart_CodEle2, mstart_CodEle3,
@@ -247,7 +257,7 @@ export async function crearBPparaNP(
             mst_Transferido, mst_PrCostoTME,
             mstda1_Cod, mstda2_Cod
           )
-          OUTPUT INSERTED.mst_ID
+          OUTPUT INSERTED.mst_ID INTO @idsMst
           VALUES (
             'CANE', ' ', ${cmsID},
             '2', '${item.sdvart_CodGen}', '${item.sdvart_CodEle1?.trim() || ' '}', '${item.sdvart_CodEle2?.trim() || ' '}', '${item.sdvart_CodEle3?.trim() || ' '}',
@@ -258,6 +268,8 @@ export async function crearBPparaNP(
             ' ', 0,
             'ADI', 'ADI'
           )
+
+          SELECT mst_ID FROM @idsMst
         `)
         const mstID = insertMst.recordset[0].mst_ID
 
@@ -367,6 +379,8 @@ export async function crearBPparaNP(
           cantUM2Total += cantUM2DeEstaPartida
 
           const insertMst = await request.query(`
+            DECLARE @idsMst TABLE (mst_ID INT)
+
             INSERT INTO MovStock (
               mstemp_Codigo, mstsuc_Cod, mstcms_ID,
               mstart_Tipo, mstart_CodGen, mstart_CodEle1, mstart_CodEle2, mstart_CodEle3,
@@ -377,7 +391,7 @@ export async function crearBPparaNP(
               mst_Transferido, mst_PrCostoTME,
               mstda1_Cod, mstda2_Cod
             )
-            OUTPUT INSERTED.mst_ID
+            OUTPUT INSERTED.mst_ID INTO @idsMst
             VALUES (
               'CANE', ' ', ${cmsID},
               '2', '${item.sdvart_CodGen}', '${item.sdvart_CodEle1?.trim() || ' '}', '${item.sdvart_CodEle2?.trim() || ' '}', '${item.sdvart_CodEle3?.trim() || ' '}',
@@ -388,6 +402,8 @@ export async function crearBPparaNP(
               ' ', 0,
               'ADI', 'ADI'
             )
+
+            SELECT mst_ID FROM @idsMst
           `)
           const mstID = insertMst.recordset[0].mst_ID
 

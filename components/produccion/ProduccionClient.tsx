@@ -216,12 +216,14 @@ export function ProduccionClient({ planillaInicial }: Props) {
       const conf = await confirmarPlanillaAction(planilla.fecha)
       if (!conf.success) {
         setFeedback({ tipo: "error", msg: conf.error })
+        await refrescar()
         return
       }
 
       const proc = await procesarPlanillaAction(planilla.fecha)
       if (!proc.success) {
         setFeedback({ tipo: "error", msg: proc.error })
+        await refrescar() // otro usuario pudo haber procesado líneas mientras tanto
         return
       }
 
@@ -479,7 +481,9 @@ export function ProduccionClient({ planillaInicial }: Props) {
           {pendientes > 0 ? (
             <>
               <span className="text-sm text-gray-500">
-                {pendientes} línea(s) sin procesar
+                {procesando
+                  ? "Si otro usuario está creando OP, la tuya espera su turno."
+                  : `${pendientes} línea(s) sin procesar`}
               </span>
               <button onClick={confirmar} disabled={procesando}
                       className="px-5 py-2 bg-blue-700 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed">

@@ -140,6 +140,27 @@ interface Partida {
 
 // ─── Numeración ───────────────────────────────────────────────────────────────
 
+/**
+ * La numeración es MAX+1 dentro de la transacción: dos creaciones en paralelo
+ * leerían el mismo número. El applock las serializa entre procesos (la web y
+ * scripts/crear-op.ts) y se libera solo con el commit o el rollback.
+ * No cubre OP cargadas a mano desde el Bejerman de escritorio.
+ */
+async function tomarLockNumeracion(req: pkg.Request): Promise<void> {
+  const r = await req.query(`
+    DECLARE @res INT
+    EXEC @res = sp_getapplock
+      @Resource = 'costos-web:crear-op',
+      @LockMode = 'Exclusive',
+      @LockOwner = 'Transaction',
+      @LockTimeout = 10000 -- por debajo del requestTimeout de mssql (15 s)
+    SELECT @res AS res
+  `)
+  if (Number(r.recordset[0].res) < 0) {
+    throw new Error("Otro proceso está creando OP en Bejerman. Esperá un momento y volvé a procesar.")
+  }
+}
+
 async function proximoNroOrden(req: pkg.Request): Promise<number> {
   const r = await req.query(`SELECT ISNULL(MAX(orden), 0) + 1 AS nro FROM ProdOrdenes`)
   return Number(r.recordset[0].nro)
@@ -280,7 +301,11 @@ async function crearMovimiento(
 ): Promise<number> {
   const nroStr = pad8(opts.nro)
 
+  // OUTPUT sin INTO no funciona sobre tablas con triggers (CabMovS y MovStock
+  // tienen triggers de auditoría STA_AUDIT_* desde el 16/09/2026)
   const insCab = await req.query(`
+    DECLARE @ids TABLE (cms_ID INT)
+
     INSERT INTO CabMovS (
       cmsemp_Codigo, cmssuc_Cod, cms_FComp,
       cms_Circuito, cmstco_Cod, cmsptr_Cod,
@@ -288,7 +313,7 @@ async function crearMovimiento(
       cms_FecMod, cmsusu_Codigo, cms_Convert,
       cms_FContab, cms_PasadoCG
     )
-    OUTPUT INSERTED.cms_ID
+    OUTPUT INSERTED.cms_ID INTO @ids
     VALUES (
       'CANE', ' ', '${opts.fechaISO}',
       'S', '${opts.tipo}', '7',
@@ -296,6 +321,8 @@ async function crearMovimiento(
       GETDATE(), '${RESPONSABLE}', ' ',
       '${opts.fechaISO}', 'C'
     )
+
+    SELECT cms_ID FROM @ids
   `)
   const cmsID = Number(insCab.recordset[0].cms_ID)
 
@@ -390,6 +417,8 @@ export async function crearOPparaLinea(
   const req = new pkg.Request(tx)
 
   try {
+    await tomarLockNumeracion(req)
+
     const formula = linea.formulaCod
     if (!formula) throw new Error(`Línea ${linea.id} sin fórmula resuelta`)
 
@@ -547,7 +576,7 @@ export async function crearOPparaLinea(
           cantUM1: -cantTotal, cantUM2: 0,
           partida: "", deposito: DEPOSITO,
         })
-        await insertarDeclComponente(req, orden, c, cmsSal, nroSal, fechaISO, cantTotal, "")
+        await insertarDeclComponente(req, orden, c, cmsSal, nroSal, fechaISO, cantTotal, "", 1)
         log(`    SAL ${pad8(nroSal)} | ${c.componente} -${cantTotal} | sin partida`)
         continue
       }
@@ -555,11 +584,13 @@ export async function crearOPparaLinea(
       // Reparte el consumo entre partidas hasta cubrir la cantidad
       const partidas = await partidasFIFO(req, c.componente, DEPOSITO)
       let restante = cantTotal
+      let indice = 0
 
       for (const p of partidas) {
         if (restante <= 0) break
         const cantDeEsta = Math.min(restante, p.stp_CantUM1)
         restante -= cantDeEsta
+        indice++
 
         const nroSal = await proximoNroMov(req, "SAL")
         const cmsSal = await crearMovimiento(req, {
@@ -568,7 +599,7 @@ export async function crearOPparaLinea(
           cantUM1: -cantDeEsta, cantUM2: 0,
           partida: p.stp_Partida, deposito: DEPOSITO,
         })
-        await insertarDeclComponente(req, orden, c, cmsSal, nroSal, fechaISO, cantDeEsta, p.stp_Partida)
+        await insertarDeclComponente(req, orden, c, cmsSal, nroSal, fechaISO, cantDeEsta, p.stp_Partida, indice)
         log(`    SAL ${pad8(nroSal)} | ${c.componente} -${cantDeEsta} | partida ${p.stp_Partida}`)
       }
 
@@ -597,6 +628,11 @@ export async function crearOPparaLinea(
   }
 }
 
+/**
+ * Una fila de declaración por cada movimiento de salida. Cuando un insumo se
+ * consume de varias partidas hay varias filas para el mismo componente, y el
+ * indice las distingue: forma parte de la clave primaria de la tabla.
+ */
 async function insertarDeclComponente(
   req: pkg.Request,
   orden: number,
@@ -606,6 +642,7 @@ async function insertarDeclComponente(
   fechaISO: string,
   cantidad: number,
   partida: string,
+  indice: number,
 ) {
   await req.query(`
     INSERT INTO ProdDecl_Componentes (
@@ -616,7 +653,7 @@ async function insertarDeclComponente(
       sbart_CodEle1, sbart_CodEle2, sbart_CodEle3, pdcpoc_Paso
     )
     VALUES (
-      ${orden}, 1, '${q(c.componente)}', '${fechaISO}', ${TURNO}, 'CONS.ESTÁNDAR',
+      ${orden}, ${indice}, '${q(c.componente)}', '${fechaISO}', ${TURNO}, 'CONS.ESTÁNDAR',
       '${q(partida) || " "}', ${CENTRO_TRABAJO}, ${cantidad}, 0, '${DEPOSITO}',
       '${fechaISO}', '${RESPONSABLE}', ${cmsID}, 'CANE',
       '${comprobStr("SAL", pad8(nroSal), fechaISO)}',

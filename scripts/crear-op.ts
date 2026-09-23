@@ -87,6 +87,15 @@ async function main() {
     log("Conectado a Bejerman\n")
 
     for (const l of pendientes.slice(0, LIMITE)) {
+      // Puede haberla procesado alguien desde la web mientras tanto
+      const actual = await prisma.planillaProduccionLinea.findUnique({
+        where: { id: l.id }, select: { ordenBej: true },
+      })
+      if (!actual || actual.ordenBej) {
+        log(`  Línea ${l.id} ya procesada, se saltea\n`)
+        continue
+      }
+
       try {
         const r = await crearOPparaLinea(
           pool,
