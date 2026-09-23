@@ -103,3 +103,54 @@ export async function obtenerArticulo(codigoArticulo: string): Promise<ArticuloE
     select: { codigo: true, descripcion: true },
   });
 }
+
+export interface PalabraDistintiva {
+  palabra: string;
+  cantidad: number;
+}
+
+// Palabras demasiado genéricas como para servir de filtro (conectores,
+// unidades sueltas, etc.) — se excluyen aunque sean frecuentes.
+const STOPWORDS_FILTRO = new Set([
+  "X", "DE", "DEL", "LA", "EL", "LOS", "LAS", "PARA", "CON", "Y", "A", "EN",
+  "KG", "GR", "GRS", "UN", "UNA", "UNI", "C", "S",
+]);
+
+/**
+ * Cuando una búsqueda por texto da demasiadas coincidencias (ej. "aji" con
+ * variantes de molienda y presentación), esta función mira las
+ * descripciones de esos resultados y encuentra qué palabras los diferencian
+ * — para ofrecerlas como filtro en vez de listar todo o pedirle a ciegas
+ * al usuario que "sea más específico".
+ *
+ * Una palabra es útil como filtro si aparece en MÁS DE UN artículo (si no,
+ * ya sería tan específica como elegir el artículo directamente) pero NO EN
+ * TODOS (si no, no filtra nada).
+ */
+export function obtenerPalabrasDistintivas(
+  articulos: ArticuloEncontrado[],
+  textoBusqueda: string,
+  maxPalabras = 8
+): PalabraDistintiva[] {
+  const palabrasBusqueda = new Set(textoBusqueda.trim().toUpperCase().split(/\s+/).filter(Boolean));
+  const conteo = new Map<string, number>();
+
+  for (const art of articulos) {
+    const vistasEnEsteArticulo = new Set<string>();
+    for (const cruda of art.descripcion.toUpperCase().split(/\s+/)) {
+      const palabra = cruda.replace(/[^A-Z0-9ÁÉÍÓÚÑ/]/g, "");
+      if (palabra.length < 2) continue;
+      if (palabrasBusqueda.has(palabra) || STOPWORDS_FILTRO.has(palabra)) continue;
+      if (vistasEnEsteArticulo.has(palabra)) continue; // contar 1 vez por artículo
+      vistasEnEsteArticulo.add(palabra);
+      conteo.set(palabra, (conteo.get(palabra) ?? 0) + 1);
+    }
+  }
+
+  const total = articulos.length;
+  return [...conteo.entries()]
+    .filter(([, cantidad]) => cantidad >= 2 && cantidad < total)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxPalabras)
+    .map(([palabra, cantidad]) => ({ palabra, cantidad }));
+}

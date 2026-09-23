@@ -1,6 +1,6 @@
 // lib/whatsapp/conversation-handler.ts
 import { sendTextMessage, sendButtons, sendList, markAsRead } from "./client";
-import { buscarArticulos, consultarPrecio, obtenerArticulo } from "./bejerman-lookup";
+import { buscarArticulos, consultarPrecio, obtenerArticulo, obtenerPalabrasDistintivas } from "./bejerman-lookup";
 import { consultarStock } from "./bejerman-live";
 import { obtenerSesion, actualizarSesion, reiniciarSesion, type Sesion } from "./session";
 import { calcularFechaEntrega, INFO_RETIRO } from "./delivery-schedule";
@@ -8,8 +8,8 @@ import { buscarUltimoEnvio } from "./order-history";
 import type { WhatsAppMessage, CarritoItem } from "./types";
 
 type DatosEntrega =
-  | { tipo: "RETIRO" }
-  | { tipo: "TRANSPORTE" }
+  | { tipo: "RETIRO"; nombrePersona?: string }
+  | { tipo: "TRANSPORTE"; nombrePersona?: string }
   | { tipo: "REPARTO"; nombreLocal?: string; nombrePersona?: string; direccion?: string };
 
 /**
@@ -48,9 +48,13 @@ export async function handleIncomingMessage(message: WhatsAppMessage, nombreCont
 }
 
 // Si hay más coincidencias que las que entran en una lista de WhatsApp,
-// mejor pedirle al usuario que afine la búsqueda en vez de mostrar una
-// lista parcial y potencialmente no incluir lo que buscaba.
+// mejor ofrecer un filtro (palabras distintivas) en vez de listar una
+// parte y quizás no incluir lo que el usuario buscaba.
 const MAX_RESULTADOS_LISTA = 8;
+
+// Muestra más grande para analizar qué palabras diferencian los resultados
+// cuando hay demasiadas coincidencias (no se muestran, solo se analizan).
+const MUESTRA_PARA_ANALISIS = 60;
 
 // Cuántas cantidades "rápidas" (1, 2, 3...) ofrecemos como filas de lista
 // antes de pasar a "Más de N" (texto libre). WhatsApp limita a 10 filas
@@ -64,7 +68,9 @@ function obtenerDatosEntrega(sesion: Sesion): DatosEntrega | undefined {
 
 async function manejarTextoLibre(telefono: string, texto: string, sesion: Sesion) {
   const textoNorm = texto.trim().toLowerCase();
-  const saludo = /^(hola|buenas|hi|buen[oa]s? d[ií]as|buenas tardes)/i;
+  // \b al final es clave: sin eso, "hi" matchea el inicio de "Hilo",
+  // "historia", etc. y reiniciaba la sesión por error.
+  const saludo = /^(hola|buenas|hi|buen[oa]s? d[ií]as|buenas tardes)\b/i;
 
   // Salidas rápidas: saludo o "menu" interrumpen cualquier flujo en curso
   // (ej. si estaba esperando una cantidad y el usuario se arrepiente).
@@ -82,7 +88,7 @@ async function manejarTextoLibre(telefono: string, texto: string, sesion: Sesion
     return;
   }
 
-  // --- Recolectando datos de reparto (nombre del local, persona, dirección) ---
+  // --- Recolectando datos de entrega (según el tipo elegido al principio) ---
   if (sesion.estadoActual === "ESPERANDO_NOMBRE_LOCAL") {
     await procesarNombreLocal(telefono, texto, sesion);
     return;
@@ -99,6 +105,15 @@ async function manejarTextoLibre(telefono: string, texto: string, sesion: Sesion
   // A partir de acá, tratamos cualquier otro texto como una búsqueda de
   // artículo — es lo más común una vez que el usuario ya está armando pedido
   // o preguntando por algo puntual (ej. "harina 000", "tenés sal fina?").
+  await realizarBusquedaArticulo(telefono, texto);
+}
+
+/**
+ * Busca artículos por texto y decide qué mostrar según cuántas coincidencias
+ * haya. Está separada de manejarTextoLibre porque también se llama de forma
+ * recursiva cuando el usuario elige una palabra para refinar la búsqueda.
+ */
+async function realizarBusquedaArticulo(telefono: string, texto: string) {
   const { articulos, totalCoincidencias } = await buscarArticulos(texto, MAX_RESULTADOS_LISTA);
 
   if (totalCoincidencias === 0) {
@@ -115,14 +130,41 @@ async function manejarTextoLibre(telefono: string, texto: string, sesion: Sesion
   }
 
   if (totalCoincidencias > MAX_RESULTADOS_LISTA) {
-    await sendTextMessage(
+    // Demasiadas coincidencias: en vez de listar una parte al azar, traemos
+    // una muestra más grande para ver qué palabras las diferencian
+    // (ej. "FINO"/"MEDIO"/"GRUESO", "1KG"/"5KG") y las ofrecemos como filtro.
+    const muestra = await buscarArticulos(texto, MUESTRA_PARA_ANALISIS);
+    const palabras = obtenerPalabrasDistintivas(muestra.articulos, texto);
+
+    if (palabras.length === 0) {
+      // No encontramos ninguna palabra que sirva de filtro (raro, pero
+      // puede pasar) — pedimos más detalle a mano como último recurso.
+      await sendTextMessage(
+        telefono,
+        `Encontré ${totalCoincidencias} artículos que coinciden con "${texto}" y no pude encontrar una forma de acotarlo automáticamente. ¿Podés agregar algún detalle más (marca, presentación, tamaño)?`
+      );
+      return;
+    }
+
+    await sendList(
       telefono,
-      `Encontré ${totalCoincidencias} artículos que coinciden con "${texto}" — es demasiado para mostrarte. ¿Podés agregar algún detalle más (marca, presentación, tamaño)?`
+      `Encontré ${totalCoincidencias} artículos para "${texto}" — elegí una característica para acotar la búsqueda:`,
+      "Filtrar",
+      [
+        {
+          title: "Filtros sugeridos",
+          rows: palabras.map((p) => ({
+            id: `REFINAR|${p.palabra}|${texto}`,
+            title: p.palabra.slice(0, 24),
+            description: `${p.cantidad} artículos`,
+          })),
+        },
+      ]
     );
     return;
   }
 
-  // Varios matches, pero pocos: mandamos una lista interactiva para que elija.
+  // Pocas coincidencias: mandamos una lista interactiva para que elija.
   await sendList(telefono, `Encontré varias coincidencias para "${texto}", elegí una:`, "Ver opciones", [
     {
       title: "Resultados",
@@ -297,22 +339,19 @@ async function manejarSeleccionBoton(telefono: string, idBoton: string, sesion: 
 
   if (idBoton === "TRANSPORTE") {
     await actualizarSesion(telefono, {
-      estadoActual: "ARMANDO_PEDIDO",
+      estadoActual: "ESPERANDO_NOMBRE_PERSONA",
       contexto: { datosEntrega: { tipo: "TRANSPORTE" } },
     });
-    await sendTextMessage(
-      telefono,
-      "Para envíos por transporte coordinamos los detalles (empresa, costo, tiempos) directo con vos. Decime igual qué artículos necesitás, así lo dejamos anotado como referencia."
-    );
+    await sendTextMessage(telefono, "¿A nombre de quién hacemos el pedido?");
     return;
   }
 
   if (idBoton === "RETIRO") {
     await actualizarSesion(telefono, {
-      estadoActual: "ARMANDO_PEDIDO",
+      estadoActual: "ESPERANDO_NOMBRE_PERSONA",
       contexto: { datosEntrega: { tipo: "RETIRO" } },
     });
-    await sendTextMessage(telefono, "Buenísimo, ¿qué artículo necesitás? (escribilo como lo conocés, ej: \"harina 000\")");
+    await sendTextMessage(telefono, "¿A nombre de quién retira el pedido?");
     return;
   }
 
@@ -368,10 +407,27 @@ async function procesarNombreLocal(telefono: string, texto: string, sesion: Sesi
   await sendTextMessage(telefono, "¿A nombre de quién recibimos el pedido?");
 }
 
+/**
+ * Después del nombre de la persona, el siguiente paso depende del tipo de
+ * entrega: reparto todavía necesita la dirección; retiro y transporte ya
+ * tienen todo lo necesario y pasan directo a armar el pedido.
+ */
 async function procesarNombrePersona(telefono: string, texto: string, sesion: Sesion) {
-  const datosEntrega = { ...(obtenerDatosEntrega(sesion) as object), nombrePersona: texto.trim() };
-  await actualizarSesion(telefono, { estadoActual: "ESPERANDO_DIRECCION", contexto: { datosEntrega } });
-  await sendTextMessage(telefono, "¿Cuál es la dirección de entrega?");
+  const datosEntrega = { ...(obtenerDatosEntrega(sesion) as object), nombrePersona: texto.trim() } as DatosEntrega;
+
+  if (datosEntrega.tipo === "REPARTO") {
+    await actualizarSesion(telefono, { estadoActual: "ESPERANDO_DIRECCION", contexto: { datosEntrega } });
+    await sendTextMessage(telefono, "¿Cuál es la dirección de entrega?");
+    return;
+  }
+
+  await actualizarSesion(telefono, { estadoActual: "ARMANDO_PEDIDO", contexto: { datosEntrega } });
+
+  const mensaje =
+    datosEntrega.tipo === "TRANSPORTE"
+      ? "Para envíos por transporte coordinamos los detalles (empresa, costo, tiempos) directo con vos. Decime igual qué artículos necesitás, así lo dejamos anotado como referencia."
+      : "Buenísimo, ¿qué artículo necesitás? (escribilo como lo conocés, ej: \"harina 000\")";
+  await sendTextMessage(telefono, mensaje);
 }
 
 async function procesarDireccion(telefono: string, texto: string, sesion: Sesion) {
@@ -399,9 +455,9 @@ async function mostrarResumenPedido(telefono: string, sesion: Sesion) {
 
   let bloqueEntrega = "";
   if (datosEntrega?.tipo === "RETIRO") {
-    bloqueEntrega = "\n\nRetiro en el local.";
+    bloqueEntrega = `\n\nRetiro en el local — Retira: ${datosEntrega.nombrePersona ?? "-"}.`;
   } else if (datosEntrega?.tipo === "TRANSPORTE") {
-    bloqueEntrega = "\n\nEnvío por transporte (a coordinar con nuestro equipo).";
+    bloqueEntrega = `\n\nEnvío por transporte (a coordinar con nuestro equipo) — A nombre de: ${datosEntrega.nombrePersona ?? "-"}.`;
   } else if (datosEntrega?.tipo === "REPARTO") {
     const { etiqueta } = calcularFechaEntrega();
     bloqueEntrega =
@@ -477,6 +533,16 @@ async function manejarSeleccionLista(telefono: string, idOpcion: string, sesion:
       },
     });
     await sendTextMessage(telefono, `Decime la cantidad exacta de ${articulo?.descripcion ?? codigo} que querés.`);
+    return;
+  }
+
+  // Filtro elegido para acotar una búsqueda con demasiados resultados:
+  // "REFINAR|<palabra>|<textoOriginal>"
+  if (idOpcion.startsWith("REFINAR|")) {
+    const partes = idOpcion.split("|");
+    const palabra = partes[1];
+    const textoOriginal = partes.slice(2).join("|");
+    await realizarBusquedaArticulo(telefono, `${textoOriginal} ${palabra}`);
     return;
   }
 
