@@ -6,7 +6,9 @@ import {
   consultarPrecio,
   consultarPrecios,
   obtenerArticulo,
-  obtenerPalabrasDistintivas,
+  sugerirFiltros,
+  cumpleFiltro,
+  tituloFiltro,
   normalizarBusqueda,
   contarPorRubro,
   nombreRubro,
@@ -94,9 +96,9 @@ export async function handleIncomingMessage(message: WhatsAppMessage, nombreCont
 // parte y quizás no incluir lo que el usuario buscaba.
 const MAX_RESULTADOS_LISTA = 8;
 
-// Muestra más grande para analizar qué palabras diferencian los resultados
-// cuando hay demasiadas coincidencias (no se muestran, solo se analizan).
-const MUESTRA_PARA_ANALISIS = 60;
+// Cuántos resultados se traen para contar y aplicar filtros (no se muestran
+// todos: solo se analizan). Alcanza para las búsquedas más amplias ("cuchillo").
+const MAX_ARTICULOS_ANALISIS = 500;
 
 // Artículos que se pueden tocar para modificar en "Ver mi pedido"; las 2
 // filas restantes de la lista son "Agregar otro" y "Finalizar pedido".
@@ -434,22 +436,35 @@ async function irAlMenu(telefono: string, sesion: Sesion) {
 
 /**
  * Busca artículos por texto y decide qué mostrar según cuántas coincidencias
- * haya. Se llama también al elegir un rubro (RUBRO|) o una palabra de filtro
- * (FILTRO|) para acotar una búsqueda con demasiados resultados.
+ * haya. Se llama también al elegir un rubro (RUBRO|) o un filtro (FILTRO|)
+ * para acotar una búsqueda con demasiados resultados.
  *
  * Con muchas coincidencias, primero se ofrece el rubro si están mezclados
- * ("hamburguesa": condimentos, moldes, papel) y después palabras de filtro.
+ * ("hamburguesa": condimentos, moldes, papel) y después filtros de
+ * presentación ("5 kg"), variedad ("Sin ajo") o palabra. Los filtros se
+ * acumulan y se aplican sobre lo ya encontrado: cada uno deja menos
+ * productos, así que no hay ciclos.
  */
-async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto: string, rubro?: string) {
+async function realizarBusquedaArticulo(
+  telefono: string,
+  sesion: Sesion,
+  texto: string,
+  rubro?: string,
+  filtros: string[] = []
+) {
   // Una búsqueda nueva descarta el artículo que estaba esperando cantidad o
   // variante: si no, un "3" escrito después se sumaba al artículo anterior.
   if (sesion.estadoActual === "ESPERANDO_CANTIDAD" || sesion.estadoActual === "ESPERANDO_VARIANTE") {
     await actualizarSesion(telefono, { estadoActual: "ARMANDO_PEDIDO", contexto: contextoBase(sesion) });
   }
 
-  const { articulos, totalCoincidencias } = await buscarArticulos(texto, MAX_RESULTADOS_LISTA, rubro);
+  const encontrados = await buscarArticulos(texto, MAX_ARTICULOS_ANALISIS, rubro);
+  const articulos = encontrados.articulos.filter((a) => filtros.every((f) => cumpleFiltro(a.descripcion, f)));
+  const totalCoincidencias = filtros.length > 0 ? articulos.length : encontrados.totalCoincidencias;
+
   // Lo que se buscó de verdad, sin "necesito", "de", plurales: "disco picadora".
-  const buscado = textoBuscado(texto) + (rubro ? ` en ${nombreRubro(rubro)}` : "");
+  const buscado =
+    [textoBuscado(texto), ...filtros.map(tituloFiltro)].join(" ") + (rubro ? ` en ${nombreRubro(rubro)}` : "");
 
   if (totalCoincidencias === 0) {
     await sendTextMessage(
@@ -470,11 +485,11 @@ async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto:
   await actualizarSesion(telefono, { contexto: { ...contextoBase(sesion), ultimaBusqueda: texto } });
 
   // Los ids llevan el texto del cliente: se recorta para no pasar los 200.
-  const textoId = texto.slice(0, 140);
+  const textoId = texto.slice(0, 120);
 
   if (totalCoincidencias > MAX_RESULTADOS_LISTA) {
     // Mezcla de rubros: primero que elija qué tipo de producto busca.
-    if (!rubro) {
+    if (!rubro && filtros.length === 0) {
       const rubros = await contarPorRubro(texto);
       if (rubros.length >= 2) {
         const visibles = rubros.slice(0, MAX_FILAS_LISTA);
@@ -498,50 +513,56 @@ async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto:
       }
     }
 
-    // Un solo rubro (o ya elegido): palabras que diferencian los resultados
-    // (ej. "FINO"/"MEDIO"/"GRUESO", "CONDIMENTO"/"INTEGRAL").
-    const muestra = await buscarArticulos(texto, MUESTRA_PARA_ANALISIS, rubro);
-    const palabras = obtenerPalabrasDistintivas(muestra.articulos, texto);
+    const sugeridos = sugerirFiltros(articulos, texto, MAX_FILAS_LISTA).filter((s) => !filtros.includes(s.clave));
+    if (sugeridos.length > 0) {
+      const secciones = [
+        { title: "Presentación", tipo: "presentacion" },
+        { title: "Variedad", tipo: "sin" },
+        { title: "Tipo", tipo: "palabra" },
+      ]
+        .map(({ title, tipo }) => ({
+          title,
+          rows: sugeridos
+            .filter((s) => s.tipo === tipo)
+            .map((s) => ({
+              id: `FILTRO|${rubro ?? ""}|${[...filtros, s.clave].join(";")}|${textoId}`,
+              title: truncar(s.titulo, LARGO_TITULO_FILA),
+              description: `${s.cantidad} producto${s.cantidad === 1 ? "" : "s"}`,
+            })),
+        }))
+        .filter((s) => s.rows.length > 0);
 
-    if (palabras.length === 0) {
-      // No encontramos ninguna palabra que sirva de filtro (raro, pero
-      // puede pasar) — pedimos más detalle a mano como último recurso.
-      await sendTextMessage(
+      await sendList(
         telefono,
-        `Hay ${totalCoincidencias} productos para "${buscado}". ¿Podés agregar algún detalle más (marca, presentación, tamaño)?`
+        `Hay ${totalCoincidencias} productos para "${buscado}". Tocá "Filtrar" para elegir presentación o variedad, o escribí una búsqueda más precisa.`,
+        "Filtrar",
+        secciones
       );
       return;
     }
-
-    await sendList(
-      telefono,
-      `Hay ${totalCoincidencias} productos para "${buscado}". Para encontrar el tuyo más rápido, tocá "Filtrar" y elegí una característica, o escribí una búsqueda más precisa.`,
-      "Filtrar",
-      [
-        {
-          title: "Filtros sugeridos",
-          rows: palabras.map((p) => ({
-            id: `FILTRO|${rubro ?? ""}|${p.palabra}|${textoId}`,
-            title: truncar(p.palabra, LARGO_TITULO_FILA),
-            description: `${p.cantidad} productos`,
-          })),
-        },
-      ]
-    );
-    return;
+    // Sin filtros útiles (raro): se muestran los primeros y se pide detalle.
   }
 
   // Pocas coincidencias: lista con la descripción como título (el código no
   // le dice nada al cliente) y el precio abajo. Si mezclan rubros, el rubro
   // también va abajo, para distinguir el condimento del molde.
-  const precios = await consultarPrecios(articulos.map((a) => a.codigo));
-  const titulos = titulosDistintivos(articulos.map((a) => a.descripcion));
-  const mezclaRubros = new Set(articulos.map((a) => rubroDe(a.codigo))).size > 1;
+  const visibles = articulos.slice(0, MAX_RESULTADOS_LISTA);
+  const precios = await consultarPrecios(visibles.map((a) => a.codigo));
+  // Lo buscado y los filtros ya aplicados no hace falta repetirlos en cada título.
+  const titulos = titulosDistintivos(
+    visibles.map((a) => a.descripcion),
+    [texto, ...filtros.map(tituloFiltro)].join(" ")
+  );
+  const mezclaRubros = new Set(visibles.map((a) => rubroDe(a.codigo))).size > 1;
+  const encabezado =
+    totalCoincidencias > visibles.length
+      ? `Hay ${totalCoincidencias} productos para "${buscado}"; te muestro ${visibles.length}. Si no está el tuyo, escribí más detalle.`
+      : `Encontré ${totalCoincidencias} opciones para "${buscado}". Tocá "Ver opciones" y elegí una:`;
 
-  await sendList(telefono, `Encontré ${totalCoincidencias} opciones para "${buscado}". Tocá "Ver opciones" y elegí una:`, "Ver opciones", [
+  await sendList(telefono, encabezado, "Ver opciones", [
     {
       title: "Resultados",
-      rows: articulos.map((r, i) => {
+      rows: visibles.map((r, i) => {
         // Si la descripción no entra en el título, va completa abajo junto al precio.
         const partes = [
           mezclaRubros ? nombreRubro(rubroDe(r.codigo)) : null,
@@ -569,14 +590,31 @@ function textoBuscado(texto: string): string {
  * descripciones se cortan igual ("Disco para picadora man…"), se saca el
  * comienzo que comparten y se muestra lo que las diferencia ("…manual N-8").
  */
-function titulosDistintivos(descripciones: string[]): string[] {
-  const titulos = descripciones.map((d) => truncar(d, LARGO_TITULO_FILA));
+function titulosDistintivos(descripciones: string[], textoBusqueda = ""): string[] {
+  // 1. Si la descripción no entra, se le sacan las palabras que el cliente ya
+  //    buscó y los conectores: "Preparados para milanesas por 5 Kg SIN AJO"
+  //    buscando "milanesa" → "Preparados 5 Kg SIN AJO".
+  const formas = normalizarBusqueda(textoBusqueda).flat();
+  const sobra = (palabra: string) => {
+    const p = sinAcentosMayus(palabra).toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
+    return CONECTORES_TITULO.has(p) || formas.some((f) => p === f || (f.length >= 4 && p.startsWith(f)));
+  };
+  const palabrasTitulo = descripciones.map((d) => {
+    const palabras = d.split(/\s+/);
+    if (d.length <= LARGO_TITULO_FILA) return palabras;
+    const utiles = palabras.filter((p) => !sobra(p));
+    return utiles.length > 0 ? utiles : palabras;
+  });
+  const titulos = palabrasTitulo.map((p) => truncar(capitalizarPrimera(p.join(" ")), LARGO_TITULO_FILA));
+
+  // 2. Si igual quedan repetidos (se cortan en el mismo lugar), se saca el
+  //    comienzo que comparten y se muestra lo que los diferencia ("…manual N-8").
   const grupos = new Map<string, number[]>();
   titulos.forEach((t, i) => grupos.set(t, [...(grupos.get(t) ?? []), i]));
 
   for (const indices of grupos.values()) {
     if (indices.length < 2) continue;
-    const palabras = indices.map((i) => descripciones[i].split(/\s+/));
+    const palabras = indices.map((i) => palabrasTitulo[i]);
     let comunes = 0;
     while (palabras.every((p) => p.length > comunes + 1 && p[comunes].toLowerCase() === palabras[0][comunes].toLowerCase())) {
       comunes++;
@@ -588,6 +626,10 @@ function titulosDistintivos(descripciones: string[]): string[] {
   }
   return titulos;
 }
+
+const CONECTORES_TITULO = new Set(["para", "por", "de", "del", "x", "con", "la", "el", "en", "y"]);
+
+const capitalizarPrimera = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 /**
  * Palabras de la búsqueda que no están en la descripción del artículo: lo que
@@ -1685,10 +1727,18 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
     return;
   }
 
-  // Palabra elegida para acotar: "FILTRO|<rubro o vacío>|<palabra>|<texto>"
+  // Filtros elegidos para acotar: "FILTRO|<rubro o vacío>|<f1;f2…>|<texto>",
+  // con f = "P:5 kg", "S:ajo" o "W:condimento" (o una palabra suelta, en
+  // mensajes anteriores). Se acumulan: cada toque suma uno.
   if (idOpcion.startsWith("FILTRO|")) {
-    const [, rubro, palabra, ...resto] = idOpcion.split("|");
-    await realizarBusquedaArticulo(telefono, sesion, `${resto.join("|")} ${palabra}`, rubro || undefined);
+    const [, rubro, filtros, ...resto] = idOpcion.split("|");
+    await realizarBusquedaArticulo(
+      telefono,
+      sesion,
+      resto.join("|"),
+      rubro || undefined,
+      filtros.split(";").filter(Boolean)
+    );
     return;
   }
 

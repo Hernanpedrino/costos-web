@@ -307,11 +307,6 @@ export async function obtenerArticulo(codigoArticulo: string): Promise<ArticuloE
   });
 }
 
-export interface PalabraDistintiva {
-  palabra: string;
-  cantidad: number;
-}
-
 // Palabras demasiado genéricas como para servir de filtro (conectores,
 // unidades sueltas, etc.) — se excluyen aunque sean frecuentes.
 const STOPWORDS_FILTRO = new Set([
@@ -319,50 +314,162 @@ const STOPWORDS_FILTRO = new Set([
   "KG", "GR", "GRS", "UN", "UNA", "UNI", "C", "S", "CM", "MM", "MT", "MTS", "LT", "CC", "N", "NRO",
 ]);
 
+// ─── Filtros para acotar una búsqueda con muchos resultados ──────────────────
+//
+// Cuando una búsqueda da más resultados de los que entran en una lista, se
+// ofrecen filtros armados con lo que diferencia a esos productos:
+//   - Presentación: "1 kg", "5 kg", "25 kg" (sale de "por 5 Kg", "x 25 KG")
+//   - Variedad "sin": "Sin ajo", "Sin especias" (antes se ofrecía "AJO" solo,
+//     que decía lo contrario de lo que filtraba)
+//   - Palabra: "Condimento", "Integral" (singular y plural juntos)
+// Los filtros se aplican sobre la lista ya encontrada y se acumulan: cada uno
+// deja estrictamente menos productos, así que no se puede entrar en un ciclo.
+//
+// Clave de un filtro (va en los ids de WhatsApp): "P:5 kg", "S:ajo", "W:condimento".
+
+export interface FiltroSugerido {
+  clave: string;
+  titulo: string;
+  cantidad: number;
+  tipo: "presentacion" | "sin" | "palabra";
+}
+
+const UNIDADES_PRESENTACION: Record<string, string> = {
+  kg: "kg", kgs: "kg", k: "kg", kilo: "kg", kilos: "kg",
+  gr: "g", grs: "g", g: "g",
+  lt: "l", lts: "l", l: "l", litro: "l", litros: "l",
+  cc: "cc", ml: "ml",
+  mt: "m", mts: "m", metro: "m", metros: "m",
+  cm: "cm", mm: "mm",
+  u: "u", un: "u", unid: "u", unidades: "u",
+};
+
+// El número no puede venir pegado a una letra: "S1211K" es un modelo, no 1211 kg.
+const RE_PRESENTACION = /(?<![a-z0-9])(\d+(?:[.,]\d+)?)\s*(kgs?|kilos?|k|grs?|g|lts?|litros?|l|cc|ml|mts?|metros?|cm|mm|unid(?:ades)?|un|u)\b/i;
+
+/** "Preparados para milanesas por 5 Kg" → "5 kg"; null si no dice presentación. */
+function presentacionDe(descripcion: string): string | null {
+  const m = sinAcentos(descripcion.toLowerCase()).match(RE_PRESENTACION);
+  if (!m) return null;
+  const numero = String(Number(m[1].replace(",", "."))).replace(".", ",");
+  return `${numero} ${UNIDADES_PRESENTACION[m[2].toLowerCase()] ?? m[2].toLowerCase()}`;
+}
+
+/** Singular simple para comparar palabras ("preparados" → "preparado"). */
+function singular(palabra: string): string {
+  const p = sinAcentos(palabra.toLowerCase());
+  return p.length > 3 && p.endsWith("s") ? p.slice(0, -1) : p;
+}
+
+/** Palabras de una descripción (minúsculas, sin acentos, sin puntuación de borde). */
+function palabrasDescripcion(descripcion: string): string[] {
+  return sinAcentos(descripcion.toLowerCase())
+    .split(/[\s/]+/) // "manual/electrica" son dos palabras
+    .map((p) => p.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+    .filter(Boolean);
+}
+
+/** Lo que va después de cada "sin" ("SIN AJO" → ["ajo"]). */
+function sinDe(descripcion: string): string[] {
+  const palabras = palabrasDescripcion(descripcion);
+  return palabras.flatMap((p, i) => (p === "sin" && palabras[i + 1] ? [singular(palabras[i + 1])] : []));
+}
+
+/** ¿La descripción cumple el filtro? */
+export function cumpleFiltro(descripcion: string, clave: string): boolean {
+  const [tipo, ...resto] = clave.split(":");
+  const valor = resto.join(":");
+  if (tipo === "P") return presentacionDe(descripcion) === valor;
+  if (tipo === "S") return sinDe(descripcion).includes(singular(valor));
+  // "W:" o una palabra suelta (ids de mensajes anteriores: "CONDIMENTO").
+  const palabra = singular(tipo === "W" ? valor : clave);
+  return palabrasDescripcion(descripcion).some((p) => singular(p) === palabra);
+}
+
+/** Título legible de un filtro ya aplicado, para el encabezado ("5 kg", "sin ajo"). */
+export function tituloFiltro(clave: string): string {
+  const [tipo, ...resto] = clave.split(":");
+  const valor = resto.join(":");
+  if (tipo === "P") return valor;
+  if (tipo === "S") return `sin ${valor}`;
+  return (tipo === "W" ? valor : clave).toLowerCase();
+}
+
+const capitalizar = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
 /**
- * Cuando una búsqueda por texto da demasiadas coincidencias (ej. "aji" con
- * variantes de molienda y presentación), esta función mira las
- * descripciones de esos resultados y encuentra qué palabras los diferencian
- * — para ofrecerlas como filtro en vez de listar todo o pedirle a ciegas
- * al usuario que "sea más específico".
- *
- * Una palabra es útil como filtro si aparece en MÁS DE UN artículo (si no,
- * ya sería tan específica como elegir el artículo directamente) pero NO EN
- * TODOS (si no, no filtra nada).
+ * Filtros que sirven para acotar `articulos`: presentaciones, "sin X" y
+ * palabras. Solo se ofrecen los que dejan menos productos que ahora (y, las
+ * palabras, que filtren de verdad: no una que tienen casi todos).
  */
-export function obtenerPalabrasDistintivas(
+export function sugerirFiltros(
   articulos: ArticuloEncontrado[],
   textoBusqueda: string,
-  maxPalabras = 8
-): PalabraDistintiva[] {
-  // Formas ya buscadas ("hamburguesas" → "hamburguesa"): la misma palabra en
-  // singular o plural no sirve de filtro.
-  const formasBuscadas = normalizarBusqueda(textoBusqueda).flat();
-  const yaBuscada = (palabra: string) => {
-    const p = sinAcentos(palabra.toLowerCase());
-    return formasBuscadas.some((f) => p === f || (f.length >= 4 && p.startsWith(f)));
-  };
-  const conteo = new Map<string, number>();
+  maxFiltros = 10
+): FiltroSugerido[] {
+  const total = articulos.length;
+  const formasBuscadas = new Set(normalizarBusqueda(textoBusqueda).flat().map(singular));
+
+  const presentaciones = new Map<string, number>();
+  const sin = new Map<string, { titulo: string; cantidad: number }>();
+  const palabras = new Map<string, { titulo: string; cantidad: number }>();
 
   for (const art of articulos) {
-    const vistasEnEsteArticulo = new Set<string>();
-    for (const cruda of art.descripcion.toUpperCase().split(/\s+/)) {
-      const palabra = cruda.replace(/[^A-Z0-9ÁÉÍÓÚÑ/]/g, "");
-      if (palabra.length < 2) continue;
-      if (yaBuscada(palabra) || STOPWORDS_FILTRO.has(palabra)) continue;
-      // Números sueltos ("25", "10") no dicen nada sin su unidad; los
-      // códigos largos ("000", "3360") sí pueden servir.
-      if (/^\d{1,2}$/.test(palabra)) continue;
-      if (vistasEnEsteArticulo.has(palabra)) continue; // contar 1 vez por artículo
-      vistasEnEsteArticulo.add(palabra);
-      conteo.set(palabra, (conteo.get(palabra) ?? 0) + 1);
+    const p = presentacionDe(art.descripcion);
+    if (p) presentaciones.set(p, (presentaciones.get(p) ?? 0) + 1);
+
+    const sinArt = sinDe(art.descripcion);
+    for (const s of new Set(sinArt)) {
+      const previa = sin.get(s);
+      // El título conserva la palabra como está en la descripción ("Sin especias").
+      const original = palabrasDescripcion(art.descripcion).find((p) => singular(p) === s) ?? s;
+      sin.set(s, { titulo: previa?.titulo ?? `Sin ${original}`, cantidad: (previa?.cantidad ?? 0) + 1 });
+    }
+
+    const vistas = new Set<string>();
+    for (const cruda of palabrasDescripcion(art.descripcion)) {
+      const clave = singular(cruda);
+      if (vistas.has(clave)) continue;
+      vistas.add(clave);
+      if (clave.length < 3 || /\d/.test(clave)) continue; // números, "5kg", códigos
+      if (STOPWORDS_FILTRO.has(clave.toUpperCase()) || clave === "sin") continue;
+      if (UNIDADES_PRESENTACION[clave] || sinArt.includes(clave)) continue;
+      if ([...formasBuscadas].some((f) => clave === f || (f.length >= 4 && clave.startsWith(f)))) continue;
+      const previa = palabras.get(clave);
+      palabras.set(clave, { titulo: previa?.titulo ?? capitalizar(clave), cantidad: (previa?.cantidad ?? 0) + 1 });
     }
   }
 
-  const total = articulos.length;
-  return [...conteo.entries()]
-    .filter(([, cantidad]) => cantidad >= 2 && cantidad < total)
+  const util = (cantidad: number) => cantidad >= 1 && cantidad < total;
+  const numero = (p: string) => Number(p.split(" ")[0].replace(",", "."));
+
+  // Las presentaciones más frecuentes (hasta MAX_PRESENTACIONES), mostradas
+  // de menor a mayor. En rubros con muchos tamaños (cuchillos de 6 a 30 cm)
+  // no pueden ocupar toda la lista: el tipo o la marca también importan.
+  const filtrosPresentacion: FiltroSugerido[] = [...presentaciones.entries()]
+    .filter(([, n]) => util(n))
     .sort((a, b) => b[1] - a[1])
-    .slice(0, maxPalabras)
-    .map(([palabra, cantidad]) => ({ palabra, cantidad }));
+    .slice(0, MAX_PRESENTACIONES)
+    .sort((a, b) => a[0].split(" ")[1].localeCompare(b[0].split(" ")[1]) || numero(a[0]) - numero(b[0]))
+    .map(([p, n]) => ({ clave: `P:${p}`, titulo: p, cantidad: n, tipo: "presentacion" }));
+
+  const filtrosSin: FiltroSugerido[] = [...sin.values()]
+    .filter((v) => util(v.cantidad))
+    .sort((a, b) => b.cantidad - a.cantidad)
+    .slice(0, MAX_SIN)
+    .map((v) => ({ clave: `S:${v.titulo.slice(4).toLowerCase()}`, titulo: v.titulo, cantidad: v.cantidad, tipo: "sin" }));
+
+  // Una palabra que tienen casi todos no acota (ej. "PREPARADO" en 10 de 11).
+  const lugarPalabras = maxFiltros - filtrosPresentacion.length - filtrosSin.length;
+  const filtrosPalabra: FiltroSugerido[] = [...palabras.entries()]
+    .filter(([, v]) => v.cantidad >= 2 && v.cantidad <= Math.max(1, Math.floor(total * 0.75)))
+    .sort((a, b) => b[1].cantidad - a[1].cantidad)
+    .slice(0, Math.max(0, lugarPalabras))
+    .map(([clave, v]) => ({ clave: `W:${clave}`, titulo: v.titulo, cantidad: v.cantidad, tipo: "palabra" }));
+
+  // Presentación y "sin" primero (son lo que más distingue); palabras al final.
+  return [...filtrosPresentacion, ...filtrosSin, ...filtrosPalabra];
 }
+
+const MAX_PRESENTACIONES = 4;
+const MAX_SIN = 2;
