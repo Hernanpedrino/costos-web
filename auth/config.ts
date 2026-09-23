@@ -4,7 +4,10 @@ import type { NextAuthConfig } from "next-auth"
 export const authConfig: NextAuthConfig = {
   session: {
     strategy: "jwt",
-    maxAge: 60 * 60,
+    // 30 min desde el último request (proxy.ts renueva la cookie en cada uno).
+    // Cubre el navegador cerrado; la inactividad con la pestaña abierta la
+    // controla components/CierreInactividad.tsx.
+    maxAge: 30 * 60,
   },
   trustHost: true,
   pages: {
