@@ -52,6 +52,7 @@ export type ConversationState =
   | "MENU_PRINCIPAL"
   | "VIENDO_CATALOGO"
   | "ARMANDO_PEDIDO"
+  | "ESPERANDO_VARIANTE" // artículo con variantes (medida, talle, color): falta elegir cuál
   | "ESPERANDO_CANTIDAD"
   | "ESPERANDO_TIPO_ENTREGA"
   | "ESPERANDO_REPETIR_ENVIO"
@@ -67,4 +68,13 @@ export interface CarritoItem {
   descripcion: string;
   cantidad: number;
   precioUnitario: number;
+  // Variante de Bejerman (CodEle1/2/3, trimmeados; '' si el artículo no tiene
+  // variantes). La nota de pedido necesita CodGen + CodEle1/2/3. Las sesiones
+  // guardadas antes de las variantes no los traen: el handler los completa
+  // con '' al leer la sesión.
+  codEle1: string;
+  codEle2: string;
+  codEle3: string;
+  /** Descripción de la variante para mostrar, ej. "2.40" o "TALLE 46 / BLANCO". '' si no hay. */
+  descVariante: string;
 }

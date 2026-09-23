@@ -47,15 +47,27 @@ Sistema interno: costos, dashboards, producción e integración con Bejerman. Ha
 5. **Chatbot WhatsApp** (Meta Cloud API): `app/api/webhook/whatsapp/route.ts` (bypass en proxy.ts, HMAC X-Hub-Signature-256) + `lib/whatsapp/*`. Sesión en `whatsapp_conversaciones`. Envío con `normalizarNumeroDestino` (549→54). Primero se elige la entrega (reparto/transporte/retiro), después el producto. Filtro inteligente (`REFINAR|palabra|texto`). Stock en vivo (`bejerman-live.ts`), precios lista FIN desde MySQL.
    - Reparto L-V con corte 9:30. Retiro L-V 8-16 y sábados 8-13 en Constitución 2398 esq. Viamonte.
    - "Hablar con persona" → estado `ATENCION_PERSONAL`: el bot no contesta y reenvía cada mensaje por mail a `MAIL_ATENCION` (provisorio hasta definir número y responsable).
-   - Carrito identificado por código de artículo (sin duplicados). `CONFIRMAR_PEDIDO` solo vale en `ESPERANDO_CONFIRMACION` con carrito no vacío.
+   - Carrito identificado por `CodGen~E1~E2~E3` (misma variante se suma). `CONFIRMAR_PEDIDO` solo vale en `ESPERANDO_CONFIRMACION` con carrito no vacío.
+   - Webhook: responde 200 y procesa con `after()`, descarta `message.id` repetidos, cola serial por teléfono (`lib/whatsapp/cola.ts`), registra entrantes/salientes en `whatsapp_mensajes`. Meta entra por ngrok → localhost:3000 (no pasa por Caddy); el inspector de ngrok (127.0.0.1:4040) muestra los últimos requests.
+   - `client.ts` valida los límites de Meta y lanza error (no trunca): el handler trunca.
+   - Probar sin mandar nada a Meta: `node node_modules/tsx/dist/cli.mjs --tsconfig tsconfig.json scripts/simular-chat.ts "hola" "#HACER_PEDIDO" ...` (`#ID` = botón/fila; usa el teléfono 5490000000000 y borra su sesión).
+   - Saludo: solo resetea si el mensaje entero es un saludo; "Hola, necesito X" busca X.
+
+### Artículos con variantes
+- En Bejerman, `Articulos` tiene una fila por variante (`art_CodEle1/2/3`, descripción en `artele_Desc1/2/3`); precio (`ListaPrec`) y stock (`Stock`/`StockPar`) también van por variante. `art_Gen = 1` marca una sola fila por CodGen.
+- Vendibles con variantes: ROP (talle + color, Ele1+Ele2), HOJ (medida), DIS (número), VAI. ~779 variantes.
+- MySQL: `bej_articulo_variantes` (ETL `etlVariantes`, reemplazo total, precio FIN por variante; CodEle trimmeados, '' si vacío → al escribir en Bejerman volver a `' '`).
+- Bot: artículo con variantes → `ESPERANDO_VARIANTE` (un eje: lista de medidas con stock primero + escribir la medida; dos ejes: talle y después color). Stock de todas las variantes en una query (`consultarStockVariantes`).
+- Búsqueda (`buscarArticulos`): sin acentos, sin stopwords (conectores, "necesito/quiero/tenés…"), plural simple; matchea descripción del artículo o de sus variantes.
+- Migraciones: las tablas `whatsapp_*` se crearon con `db push` → **nunca `prisma migrate dev`** (propondría reset). Escribir la migración a mano y aplicar con `prisma migrate deploy`.
 
 ## Pendientes
 1. Chatbot: que CONFIRMAR_PEDIDO cree la NP real en Bejerman (SegCabV/SegDetV + asociadas). Primero mapear contra una NP cargada a mano y mostrar el plan de inserts.
 2. Planilla: verificar en uso real que el botón crea la OP y muestra el resultado (el flujo ya está implementado).
 3. BP (postergado): el join a Stock en `baja-np-prueba.ts` (~l.63) no usa ISNULL/LTRIM, y SegDetV copia `sdvart_CodEle*` de la NP. Si la NP tiene NULL → "sin items con stock disponible" repetido y el BP queda con NULL.
 4. Chatbot: navegación del catálogo por categorías.
-5. Chatbot (diseñado en otro chat, sin implementar): variantes (`bej_articulo_variantes`, art_Gen=0 para ROP/HOJ, código CodGen~CodEle1~CodEle2~CodEle3) y cuchillos/chairas/vainas → atención personal.
-6. `bejerman-live.consultarStock` no usa `esFlagSi` ('true' no cuenta como partida).
+5. Chatbot: cuchillos/chairas/vainas → atención personal (diseñado en otro chat, sin implementar).
+6. `createFormulaAction` falla con nombres de fórmula largos (P2000 `Formula.name`): validar largo en el form/Zod.
 
 ## Forma de trabajo
 - De a un paso. Para escrituras en Bejerman, primero mapear contra un comprobante cargado a mano y mostrar el plan de inserts.
