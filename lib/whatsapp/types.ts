@@ -77,4 +77,6 @@ export interface CarritoItem {
   codEle3: string;
   /** Descripción de la variante para mostrar, ej. "2.40" o "TALLE 46 / BLANCO". '' si no hay. */
   descVariante: string;
+  /** Unidad de venta ('UN', 'KG', 'MT', 'CJ', 'LT'). Opcional: sesiones viejas no la traen → 'UN'. */
+  unidad?: string;
 }

@@ -41,6 +41,8 @@ export interface ResultadoStock {
   llevaPartida: boolean;
   /** Detalle por partida, solo si llevaPartida es true */
   partidas: StockPorPartida[];
+  /** Unidad de venta (ClasArt.claume_Cod1): 'UN', 'KG', 'MT', 'CJ', 'LT'. 'UN' si no tiene. */
+  unidad: string;
 }
 
 /**
@@ -65,11 +67,12 @@ export async function consultarStock(
   // Con variante, el flag de partida se lee de esa fila; sin variante, de la
   // genérica (art_Gen = 1) si existe.
   const rArt = await pool.request().query(`
-    SELECT TOP 1 art_StockPart
-    FROM Articulos
-    WHERE art_CodGen = '${codigo}'
-      ${variante ? `AND ${ele("art_CodEle1")} = '${e1}' AND ${ele("art_CodEle2")} = '${e2}' AND ${ele("art_CodEle3")} = '${e3}'` : ""}
-    ORDER BY art_Gen DESC
+    SELECT TOP 1 a.art_StockPart, LTRIM(RTRIM(ISNULL(c.claume_Cod1, ''))) AS unidad
+    FROM Articulos a
+    LEFT JOIN ClasArt c ON c.cla_Cod = a.artcla_Cod
+    WHERE a.art_CodGen = '${codigo}'
+      ${variante ? `AND ${ele("a.art_CodEle1")} = '${e1}' AND ${ele("a.art_CodEle2")} = '${e2}' AND ${ele("a.art_CodEle3")} = '${e3}'` : ""}
+    ORDER BY a.art_Gen DESC
   `);
   if (rArt.recordset.length === 0) {
     const detalle = variante ? ` (variante ${claveVariante(e1, e2, e3)})` : "";
@@ -78,6 +81,7 @@ export async function consultarStock(
 
   // art_StockPart es bit: mssql lo devuelve como boolean ('true'/'false')
   const llevaPartida = esFlagSi(rArt.recordset[0].art_StockPart);
+  const unidad = String(rArt.recordset[0].unidad || "UN").toUpperCase();
 
   if (!llevaPartida) {
     const rStock = await pool.request().query(`
@@ -89,7 +93,7 @@ export async function consultarStock(
         AND ${ele("stkart_CodEle3")} = '${e3}'
     `);
     const disponible = Number(rStock.recordset[0]?.cant ?? 0);
-    return { disponible, llevaPartida: false, partidas: [] };
+    return { disponible, llevaPartida: false, partidas: [], unidad };
   }
 
   const rPart = await pool.request().query(`
@@ -109,7 +113,7 @@ export async function consultarStock(
   }));
 
   const disponible = partidas.reduce((acc, p) => acc + p.cantidad, 0);
-  return { disponible, llevaPartida: true, partidas };
+  return { disponible, llevaPartida: true, partidas, unidad };
 }
 
 /**

@@ -58,6 +58,8 @@ Sistema interno: costos, dashboards, producción e integración con Bejerman. Ha
 - Vendibles con variantes: ROP (talle + color, Ele1+Ele2), HOJ (medida), DIS (número), VAI. ~779 variantes.
 - MySQL: `bej_articulo_variantes` (ETL `etlVariantes`, reemplazo total, precio FIN por variante; CodEle trimmeados, '' si vacío → al escribir en Bejerman volver a `' '`).
 - Bot: artículo con variantes → `ESPERANDO_VARIANTE` (un eje: lista de medidas con stock primero + escribir la medida; dos ejes: talle y después color). Stock de todas las variantes en una query (`consultarStockVariantes`).
+- Si la búsqueda ya nombraba la variante ("hoja 2.95", "remera azul 5"), al elegir el artículo se preselecciona (`ultimaBusqueda` en el contexto + `intentarVariante`).
+- Cantidad: la unidad de venta sale de `ClasArt.claume_Cod1` (UN 1714 arts, KG 186, MT, CJ, LT) vía `consultarStock`. Ficha con botones visibles (1/2/3 unidades o 1/5/10 kg), enteros para UN/CJ, aviso si lo pedido supera el stock (sin mostrar el número).
 - Búsqueda (`buscarArticulos`): sin acentos, sin stopwords (conectores, "necesito/quiero/tenés…"), plural simple; matchea descripción del artículo o de sus variantes.
 - Migraciones: las tablas `whatsapp_*` se crearon con `db push` → **nunca `prisma migrate dev`** (propondría reset). Escribir la migración a mano y aplicar con `prisma migrate deploy`.
 

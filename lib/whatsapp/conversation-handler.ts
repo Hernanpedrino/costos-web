@@ -7,6 +7,7 @@ import {
   consultarPrecios,
   obtenerArticulo,
   obtenerPalabrasDistintivas,
+  normalizarBusqueda,
   obtenerVariantes,
   type VarianteArticulo,
 } from "./bejerman-lookup";
@@ -75,10 +76,6 @@ const MAX_RESULTADOS_LISTA = 8;
 // cuando hay demasiadas coincidencias (no se muestran, solo se analizan).
 const MUESTRA_PARA_ANALISIS = 60;
 
-// WhatsApp limita a 10 filas TOTALES por lista: 6 cantidades rápidas +
-// "Otra cantidad" + "Buscar otro" + "Ver mi pedido".
-const MAX_CANTIDAD_RAPIDA = 6;
-
 // Artículos que se pueden tocar para modificar en "Ver mi pedido"; las 2
 // filas restantes de la lista son "Agregar otro" y "Finalizar pedido".
 const MAX_ITEMS_EDITABLES = 8;
@@ -100,6 +97,44 @@ function formatearPrecio(precio: number | null | undefined): string {
 
 function formatearCantidad(cantidad: number): string {
   return formatoCantidad.format(cantidad);
+}
+
+/**
+ * Unidad de venta de Bejerman (ClasArt.claume_Cod1). Define cómo se pregunta
+ * la cantidad, qué cantidades rápidas se ofrecen y si admite decimales.
+ */
+interface Unidad {
+  singular: string;
+  plural: string;
+  /** Sufijo en cantidades ("3 kg"); '' para unidades sueltas ("3 x Remera"). */
+  abrev: string;
+  /** ¿Cuánt*os* o cuánt*as*? */
+  femenino: boolean;
+  entera: boolean;
+  rapidas: number[];
+}
+
+const UNIDADES: Record<string, Unidad> = {
+  UN: { singular: "unidad", plural: "unidades", abrev: "", femenino: true, entera: true, rapidas: [1, 2, 3] },
+  CJ: { singular: "caja", plural: "cajas", abrev: "", femenino: true, entera: true, rapidas: [1, 2, 3] },
+  KG: { singular: "kg", plural: "kg", abrev: "kg", femenino: false, entera: false, rapidas: [1, 5, 10] },
+  MT: { singular: "metro", plural: "metros", abrev: "m", femenino: false, entera: false, rapidas: [1, 5, 10] },
+  LT: { singular: "litro", plural: "litros", abrev: "l", femenino: false, entera: false, rapidas: [1, 5, 10] },
+};
+
+function unidadDe(codigo: string | undefined): Unidad {
+  return UNIDADES[(codigo ?? "UN").toUpperCase()] ?? UNIDADES.UN;
+}
+
+/** "3 unidades", "2,5 kg", "1 caja" — para botones y mensajes. */
+function cantidadConNombre(cantidad: number, unidad: Unidad): string {
+  return `${formatearCantidad(cantidad)} ${cantidad === 1 ? unidad.singular : unidad.plural}`;
+}
+
+/** "3" o "2,5 kg" — para las líneas del pedido ("3 x Remera", "2,5 kg x Harina"). */
+function cantidadCorta(cantidad: number, unidad: Unidad): string {
+  if (unidad.abrev) return `${formatearCantidad(cantidad)} ${unidad.abrev}`;
+  return unidad.singular === "unidad" ? formatearCantidad(cantidad) : cantidadConNombre(cantidad, unidad);
 }
 
 function truncar(texto: string, largo: number): string {
@@ -194,7 +229,7 @@ function lineasCarrito(carrito: CarritoItem[]): string {
   return carrito
     .map((it) => {
       const subtotal = it.precioUnitario ? formatoPrecio.format(it.cantidad * it.precioUnitario) : "precio a confirmar";
-      return `• ${formatearCantidad(it.cantidad)} x ${descripcionItem(it)} — ${subtotal}`;
+      return `• ${cantidadCorta(it.cantidad, unidadDe(it.unidad))} x ${descripcionItem(it)} — ${subtotal}`;
     })
     .join("\n");
 }
@@ -366,20 +401,26 @@ async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto:
   }
 
   const { articulos, totalCoincidencias } = await buscarArticulos(texto, MAX_RESULTADOS_LISTA);
+  // Lo que se buscó de verdad, sin "necesito", "de", plurales: "disco picadora".
+  const buscado = textoBuscado(texto);
 
   if (totalCoincidencias === 0) {
     await sendTextMessage(
       telefono,
-      `No encontré productos para "${texto}". Probá con menos palabras (ej: solo "pimienta"). ${AYUDA_MENU}`
+      `No encontré productos para "${buscado}". Probá con menos palabras (ej: solo "pimienta"). ${AYUDA_MENU}`
     );
     return;
   }
 
   if (totalCoincidencias === 1) {
     const [articulo] = articulos;
-    await mostrarDetalleArticulo(telefono, sesion, articulo.codigo, articulo.descripcion, articulo.tieneVariantes);
+    await mostrarDetalleArticulo(telefono, sesion, articulo.codigo, articulo.descripcion, articulo.tieneVariantes, texto);
     return;
   }
+
+  // Se guarda la búsqueda para que, al elegir un artículo de la lista, la
+  // medida o talle que ya escribió ("hoja 2.95") no se le vuelva a pedir.
+  await actualizarSesion(telefono, { contexto: { ...contextoBase(sesion), ultimaBusqueda: texto } });
 
   if (totalCoincidencias > MAX_RESULTADOS_LISTA) {
     // Demasiadas coincidencias: en vez de listar una parte al azar, traemos
@@ -393,14 +434,14 @@ async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto:
       // puede pasar) — pedimos más detalle a mano como último recurso.
       await sendTextMessage(
         telefono,
-        `Hay ${totalCoincidencias} productos para "${texto}". ¿Podés agregar algún detalle más (marca, presentación, tamaño)?`
+        `Hay ${totalCoincidencias} productos para "${buscado}". ¿Podés agregar algún detalle más (marca, presentación, tamaño)?`
       );
       return;
     }
 
     await sendList(
       telefono,
-      `Hay ${totalCoincidencias} productos para "${texto}". Para encontrar el tuyo más rápido, tocá "Filtrar" y elegí una característica, o escribí una búsqueda más precisa.`,
+      `Hay ${totalCoincidencias} productos para "${buscado}". Para encontrar el tuyo más rápido, tocá "Filtrar" y elegí una característica, o escribí una búsqueda más precisa.`,
       "Filtrar",
       [
         {
@@ -420,11 +461,12 @@ async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto:
   // Pocas coincidencias: lista con la descripción como título (el código no
   // le dice nada al cliente) y el precio abajo.
   const precios = await consultarPrecios(articulos.map((a) => a.codigo));
+  const titulos = titulosDistintivos(articulos.map((a) => a.descripcion));
 
-  await sendList(telefono, `Encontré ${totalCoincidencias} opciones para "${texto}". Tocá "Ver opciones" y elegí una:`, "Ver opciones", [
+  await sendList(telefono, `Encontré ${totalCoincidencias} opciones para "${buscado}". Tocá "Ver opciones" y elegí una:`, "Ver opciones", [
     {
       title: "Resultados",
-      rows: articulos.map((r) => {
+      rows: articulos.map((r, i) => {
         // Si la descripción no entra en el título, va completa abajo junto al precio.
         const partes = [
           r.descripcion.length > LARGO_TITULO_FILA ? r.descripcion : null,
@@ -432,12 +474,55 @@ async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto:
         ].filter(Boolean);
         return {
           id: `ART_${r.codigo}`,
-          title: truncar(r.descripcion, LARGO_TITULO_FILA),
+          title: titulos[i],
           description: truncar(partes.join(" · "), LARGO_DESCRIPCION_FILA),
         };
       }),
     },
   ]);
+}
+
+/** Texto de búsqueda para mostrar: sin conectores ni palabras de intención, en singular. */
+function textoBuscado(texto: string): string {
+  const grupos = normalizarBusqueda(texto);
+  return grupos.length > 0 ? grupos.map((formas) => formas[formas.length - 1]).join(" ") : texto;
+}
+
+/**
+ * Títulos de fila (24 caracteres) que se distingan entre sí. Si varias
+ * descripciones se cortan igual ("Disco para picadora man…"), se saca el
+ * comienzo que comparten y se muestra lo que las diferencia ("…manual N-8").
+ */
+function titulosDistintivos(descripciones: string[]): string[] {
+  const titulos = descripciones.map((d) => truncar(d, LARGO_TITULO_FILA));
+  const grupos = new Map<string, number[]>();
+  titulos.forEach((t, i) => grupos.set(t, [...(grupos.get(t) ?? []), i]));
+
+  for (const indices of grupos.values()) {
+    if (indices.length < 2) continue;
+    const palabras = indices.map((i) => descripciones[i].split(/\s+/));
+    let comunes = 0;
+    while (palabras.every((p) => p.length > comunes + 1 && p[comunes].toLowerCase() === palabras[0][comunes].toLowerCase())) {
+      comunes++;
+    }
+    if (comunes === 0) continue;
+    indices.forEach((i, k) => {
+      titulos[i] = truncar("…" + palabras[k].slice(comunes).join(" "), LARGO_TITULO_FILA);
+    });
+  }
+  return titulos;
+}
+
+/**
+ * Palabras de la búsqueda que no están en la descripción del artículo: lo que
+ * probablemente describe la variante ("hoja 2.95" en "Hoja de sierra…" → "2.95").
+ */
+function restoParaVariante(textoBusqueda: string, descripcion: string): string {
+  const enDescripcion = new Set(normalizarBusqueda(descripcion).flat());
+  return normalizarBusqueda(textoBusqueda)
+    .filter((formas) => !formas.some((f) => enDescripcion.has(f) || [...enDescripcion].some((d) => f.length >= 4 && d.startsWith(f))))
+    .map((formas) => formas[0])
+    .join(" ");
 }
 
 /**
@@ -460,6 +545,16 @@ async function procesarCantidad(telefono: string, sesion: Sesion, cantidad: numb
     return;
   }
 
+  // Lo que se vende por unidad o caja no admite decimales ("2,5 remeras").
+  const unidad = unidadDe(sesion.contexto.unidadPendiente as string | undefined);
+  if (unidad.entera && !Number.isInteger(cantidad)) {
+    await sendTextMessage(
+      telefono,
+      `Este producto se vende por ${unidad.singular}: decime un número entero (ej: ${Math.max(1, Math.round(cantidad))}).`
+    );
+    return;
+  }
+
   if (sesion.contexto.editando) {
     // Sesiones de antes de las variantes no guardaban la clave del ítem.
     const clave = (sesion.contexto.claveItemPendiente as string | undefined) ?? claveDesdeId(codigoPendiente);
@@ -474,8 +569,47 @@ async function procesarCantidad(telefono: string, sesion: Sesion, cantidad: numb
     codigoPendiente,
     descripcionPendiente ?? codigoPendiente,
     cantidad,
-    variante
+    variante,
+    await infoVentaDe(sesion, codigoPendiente, variante)
   );
+}
+
+/** Unidad de venta y stock del artículo/variante que se está agregando. */
+interface InfoVenta {
+  unidad?: string;
+  /** Stock disponible en el depósito; undefined si no se consultó. */
+  stock?: number;
+}
+
+/**
+ * Aviso cuando lo pedido supera el stock, sin mostrar la cantidad exacta:
+ * el pedido se toma igual y el equipo confirma.
+ */
+function avisoStock(cantidad: number, unidad: Unidad, stock: number | undefined): string {
+  if (stock === undefined || cantidad <= stock) return "";
+  if (stock <= 0) return "\n\n⚠️ Ahora no hay stock: lo dejamos anotado y te confirmamos la disponibilidad.";
+  return `\n\n⚠️ Puede que no lleguemos a ${cantidadConNombre(cantidad, unidad)}: lo dejamos anotado y te confirmamos.`;
+}
+
+/**
+ * Unidad y stock para un toque de cantidad: los de la ficha que se acaba de
+ * mostrar si es el mismo artículo y variante; si no (mensaje viejo), se consultan.
+ */
+async function infoVentaDe(sesion: Sesion, codigo: string, variante?: VarianteElegida | null): Promise<InfoVenta> {
+  const pendiente = sesion.contexto.variantePendiente as VarianteElegida | undefined;
+  const claveDe = (v?: VarianteElegida | null) => (v ? claveVariante(v.codEle1, v.codEle2, v.codEle3) : "~~");
+  if (sesion.contexto.codigoPendiente === codigo && claveDe(pendiente) === claveDe(variante)) {
+    return {
+      unidad: sesion.contexto.unidadPendiente as string | undefined,
+      stock: sesion.contexto.stockPendiente as number | undefined,
+    };
+  }
+  try {
+    const stock = await consultarStock(codigo, variante ?? undefined);
+    return { unidad: stock.unidad, stock: stock.disponible };
+  } catch {
+    return {}; // sin info de stock: se agrega igual, como antes
+  }
 }
 
 /**
@@ -490,7 +624,8 @@ async function agregarItemAlCarrito(
   codigo: string,
   descripcion: string,
   cantidad: number,
-  variante?: VarianteElegida
+  variante?: VarianteElegida,
+  info?: InfoVenta
 ) {
   const nuevo: CarritoItem = {
     codigoArticulo: codigo,
@@ -501,6 +636,7 @@ async function agregarItemAlCarrito(
     codEle2: variante?.codEle2 ?? "",
     codEle3: variante?.codEle3 ?? "",
     descVariante: variante?.descVariante ?? "",
+    unidad: info?.unidad,
   };
   const clave = claveItem(nuevo);
   const existente = sesion.carritoActual.find((it) => claveItem(it) === clave);
@@ -523,13 +659,16 @@ async function agregarItemAlCarrito(
   });
 
   const nombre = descripcionItem(nuevo);
+  const unidad = unidadDe(info?.unidad ?? existente?.unidad);
+  const totalLinea = (existente?.cantidad ?? 0) + cantidad;
   const linea = existente
-    ? `Sumé ${formatearCantidad(cantidad)} más de ${nombre} — ahora llevás ${formatearCantidad(existente.cantidad + cantidad)}.`
-    : `Agregado: ${formatearCantidad(cantidad)} x ${nombre}`;
+    ? `Sumé ${cantidadConNombre(cantidad, unidad)} más de ${nombre} — ahora llevás ${cantidadConNombre(totalLinea, unidad)}.`
+    : `Agregado: ${cantidadConNombre(cantidad, unidad)} de ${nombre}`;
 
   await sendButtons(
     telefono,
-    `${linea}\n\nTu pedido tiene ${carritoActualizado.length} producto(s) — total: ${textoTotal(carritoActualizado)}`,
+    `${linea}${avisoStock(totalLinea, unidad, info?.stock)}\n\n` +
+      `Tu pedido tiene ${carritoActualizado.length} producto(s) — total: ${textoTotal(carritoActualizado)}`,
     [
       { id: "AGREGAR_OTRO", title: "Agregar otro" },
       { id: "VER_CARRITO", title: "Ver mi pedido" },
@@ -552,12 +691,17 @@ async function mostrarDetalleArticulo(
   sesion: Sesion,
   codigo: string,
   descripcion: string,
-  tieneVariantes?: boolean
+  tieneVariantes?: boolean,
+  textoBusqueda?: string
 ) {
   try {
     const variantes = tieneVariantes === false ? [] : await obtenerVariantes(codigo);
     if (variantes.length > 0) {
       const datos = await cargarDatosVariantes(codigo, descripcion, variantes);
+      // Si la búsqueda ya decía la medida/talle ("hoja 2.95", "remera azul 5"),
+      // se usa en vez de pedirla de nuevo.
+      const resto = textoBusqueda ? restoParaVariante(textoBusqueda, descripcion) : "";
+      if (resto && (await intentarVariante(telefono, sesion, datos, resto))) return;
       await mostrarPasoVariante(telefono, sesion, datos);
       return;
     }
@@ -593,28 +737,25 @@ async function mostrarFicha(
     consultarStock(codigo, variante ?? undefined),
   ]);
 
+  const unidad = unidadDe(stock.unidad);
+
   // No mostramos la cantidad exacta: al cliente le alcanza con saber si hay.
-  const stockTexto = stock.disponible > 0 ? "✅ Hay stock" : "⚠️ Sin stock por el momento";
+  const stockTexto =
+    stock.disponible > 0 ? "✅ Hay stock" : "⚠️ Sin stock por el momento (podés pedirlo igual y te confirmamos)";
+  const precioTexto = precio ? `${formatearPrecio(precio)} por ${unidad.singular}` : formatearPrecio(precio);
 
   // Los ids llevan la variante para que un toque en un mensaje viejo agregue
   // lo que el cliente vio, aunque después haya mirado otra cosa.
   const sufijo = variante ? `|${variante.codEle1}|${variante.codEle2}|${variante.codEle3}` : "";
 
-  const filasCantidad = Array.from({ length: MAX_CANTIDAD_RAPIDA }, (_, i) => ({
-    id: `CANT|${i + 1}|${codigo}${sufijo}`,
-    title: String(i + 1),
-  }));
-
-  const otrasOpciones: { id: string; title: string; description?: string }[] = [
-    { id: `MASCANT|${codigo}${sufijo}`, title: "Otra cantidad", description: "Escribir la cantidad exacta" },
-  ];
+  // Botones a la vista (un toque) en vez de una lista escondida: cantidades
+  // típicas según la unidad y, con variante, volver a elegir la medida/talle.
+  // Cualquier otra cantidad se escribe; otro producto, también.
+  const rapidas = variante ? unidad.rapidas.slice(0, 2) : unidad.rapidas;
+  const botones = rapidas.map((n) => ({ id: `CANT|${n}|${codigo}${sufijo}`, title: cantidadConNombre(n, unidad) }));
   if (variante) {
     // ART_ vuelve a la elección de variante del mismo artículo.
-    otrasOpciones.push({ id: `ART_${codigo}`, title: `Elegir ${esTalle(variante) ? "otro talle" : "otra medida"}` });
-  }
-  otrasOpciones.push({ id: "BUSCAR_OTRO", title: "Buscar otro producto" });
-  if (sesion.carritoActual.length > 0) {
-    otrasOpciones.push({ id: "VER_CARRITO", title: "Ver mi pedido" });
+    botones.push({ id: `ART_${codigo}`, title: `Elegir ${esTalle(variante) ? "otro talle" : "otra medida"}` });
   }
 
   await actualizarSesion(telefono, {
@@ -623,20 +764,23 @@ async function mostrarFicha(
       ...contextoBase(sesion),
       codigoPendiente: codigo,
       descripcionPendiente: descripcion,
+      unidadPendiente: stock.unidad,
+      stockPendiente: stock.disponible,
       ...(variante && { variantePendiente: variante }),
     },
   });
 
   const titulo = variante ? `${descripcion} — ${variante.descVariante}` : descripcion;
-  await sendList(
+  const pregunta = `¿Cuánt${unidad.femenino ? "as" : "os"} ${unidad.plural} querés?`;
+  await sendButtons(
     telefono,
-    `*${titulo}*\nPrecio: ${formatearPrecio(precio)}\n${stockTexto}\nCódigo: ${codigo}\n\n` +
-      `¿Cuánto querés? Escribí la cantidad (ej: 12) o tocá "Elegir cantidad".`,
-    "Elegir cantidad",
-    [
-      { title: "Cantidad", rows: filasCantidad },
-      { title: "Otras opciones", rows: otrasOpciones },
-    ]
+    truncar(
+      `*${titulo}*\nPrecio: ${precioTexto}\n${stockTexto}\nCódigo: ${codigo}\n\n` +
+        `${pregunta} Tocá una opción o escribí la cantidad (ej: ${unidad.entera ? "12" : "2,5"}).\n` +
+        `Para buscar otro producto, escribí su nombre.`,
+      LARGO_CUERPO_INTERACTIVO
+    ),
+    botones
   );
 }
 
@@ -1054,6 +1198,86 @@ function pareceMedida(texto: string): boolean {
 }
 
 /**
+ * Busca `texto` entre las variantes del artículo y, si encuentra algo, avanza:
+ * una sola → ficha; varias → lista de esas. Devuelve false si no coincide
+ * ninguna (el llamador decide: reenviar la lista, o buscar otro producto).
+ * Se usa con lo escrito en ESPERANDO_VARIANTE y con el resto de la búsqueda
+ * ("hoja 2.95") al elegir el artículo.
+ */
+async function intentarVariante(
+  telefono: string,
+  sesion: Sesion,
+  datos: DatosVariantes,
+  texto: string,
+  ele1?: string
+): Promise<boolean> {
+  const { codigo, descripcion } = datos;
+  const elegir = async (v: VarianteArticulo) => {
+    await mostrarFicha(telefono, sesion, codigo, descripcion, aVarianteElegida(v, datos.precioArticulo));
+    return true;
+  };
+  const encabezado = (n: number, eje: NombreEje) => `Encontré ${n} ${eje.plural} para "${texto}" en *${descripcion}*.`;
+
+  if (!datos.dosEjes) {
+    const encontradas = matchearOpciones(texto, datos.variantes, (v) => ({
+      descs: [v.desc1, v.desc2, v.desc3],
+      cods: [v.codEle1, v.codEle2, v.codEle3],
+    }));
+    if (encontradas.length === 1) return elegir(encontradas[0]);
+    if (encontradas.length > 1) {
+      await enviarListaVariantes(telefono, sesion, datos, encontradas, encabezado(encontradas.length, nombreEje1(datos)));
+      return true;
+    }
+    return false;
+  }
+
+  if (ele1 === undefined) {
+    // Talle y color juntos ("46 blanco"): si identifica una sola variante, directo a la ficha.
+    const completas = matchearOpciones(texto, datos.variantes, (v) => ({ descs: [textoVariante(v)], cods: [] }), true);
+    if (completas.length === 1) return elegir(completas[0]);
+
+    const grupos = agruparEje1(datos);
+    const encontrados = matchearOpciones(texto, grupos, (g) => ({ descs: [g.desc1], cods: [g.codEle1] }));
+    if (encontrados.length === 1) {
+      await elegirEje1(telefono, sesion, datos, encontrados[0]);
+      return true;
+    }
+    if (encontrados.length > 1) {
+      await enviarListaEje1(telefono, sesion, datos, encontrados, encabezado(encontrados.length, nombreEje1(datos)));
+      return true;
+    }
+    // Solo el color ("blanco"): todas las variantes de ese color.
+    if (completas.length > 1) {
+      await enviarListaVariantes(
+        telefono,
+        sesion,
+        datos,
+        completas,
+        `Encontré ${completas.length} opciones para "${texto}" en *${descripcion}*.`
+      );
+      return true;
+    }
+    return false;
+  }
+
+  const delTalle = datos.variantes.filter((v) => v.codEle1 === ele1);
+  let encontradas = matchearOpciones(texto, delTalle, (v) => ({
+    descs: [v.desc2, v.desc3],
+    cods: [v.codEle2, v.codEle3],
+  }));
+  // Repitió el talle con el color ("46 blanco").
+  if (encontradas.length === 0) {
+    encontradas = matchearOpciones(texto, delTalle, (v) => ({ descs: [textoVariante(v)], cods: [] }), true);
+  }
+  if (encontradas.length === 1) return elegir(encontradas[0]);
+  if (encontradas.length > 1) {
+    await enviarListaVariantes(telefono, sesion, datos, encontradas, encabezado(encontradas.length, EJE_COLOR), ele1);
+    return true;
+  }
+  return false;
+}
+
+/**
  * Texto escrito mientras se elige la variante: se busca entre las medidas
  * (o talles/colores) del artículo pendiente. Si no coincide con ninguna y no
  * parece una medida, puede ser otro producto: se busca como producto nuevo.
@@ -1077,55 +1301,7 @@ async function procesarTextoVariante(telefono: string, texto: string, sesion: Se
       return;
     }
 
-    const elegir = (v: VarianteArticulo) =>
-      mostrarFicha(telefono, sesion, codigo, descripcion, aVarianteElegida(v, datos.precioArticulo));
-    const encabezado = (n: number, eje: NombreEje) => `Encontré ${n} ${eje.plural} para "${texto}" en *${descripcion}*.`;
-
-    if (!datos.dosEjes) {
-      const encontradas = matchearOpciones(texto, datos.variantes, (v) => ({
-        descs: [v.desc1, v.desc2, v.desc3],
-        cods: [v.codEle1, v.codEle2, v.codEle3],
-      }));
-      if (encontradas.length === 1) return await elegir(encontradas[0]);
-      if (encontradas.length > 1) {
-        return await enviarListaVariantes(telefono, sesion, datos, encontradas, encabezado(encontradas.length, nombreEje1(datos)));
-      }
-    } else if (ele1 === undefined) {
-      // Talle y color juntos ("46 blanco"): si identifica una sola variante, directo a la ficha.
-      const completas = matchearOpciones(texto, datos.variantes, (v) => ({ descs: [textoVariante(v)], cods: [] }), true);
-      if (completas.length === 1) return await elegir(completas[0]);
-
-      const grupos = agruparEje1(datos);
-      const encontrados = matchearOpciones(texto, grupos, (g) => ({ descs: [g.desc1], cods: [g.codEle1] }));
-      if (encontrados.length === 1) return await elegirEje1(telefono, sesion, datos, encontrados[0]);
-      if (encontrados.length > 1) {
-        return await enviarListaEje1(telefono, sesion, datos, encontrados, encabezado(encontrados.length, nombreEje1(datos)));
-      }
-      // Solo el color ("blanco"): todas las variantes de ese color.
-      if (completas.length > 1) {
-        return await enviarListaVariantes(
-          telefono,
-          sesion,
-          datos,
-          completas,
-          `Encontré ${completas.length} opciones para "${texto}" en *${descripcion}*.`
-        );
-      }
-    } else {
-      const delTalle = datos.variantes.filter((v) => v.codEle1 === ele1);
-      let encontradas = matchearOpciones(texto, delTalle, (v) => ({
-        descs: [v.desc2, v.desc3],
-        cods: [v.codEle2, v.codEle3],
-      }));
-      // Repitió el talle con el color ("46 blanco").
-      if (encontradas.length === 0) {
-        encontradas = matchearOpciones(texto, delTalle, (v) => ({ descs: [textoVariante(v)], cods: [] }), true);
-      }
-      if (encontradas.length === 1) return await elegir(encontradas[0]);
-      if (encontradas.length > 1) {
-        return await enviarListaVariantes(telefono, sesion, datos, encontradas, encabezado(encontradas.length, EJE_COLOR), ele1);
-      }
-    }
+    if (await intentarVariante(telefono, sesion, datos, texto, ele1)) return;
 
     // Nada coincide. Si no parece una medida y es un producto, es una búsqueda nueva.
     if (!pareceMedida(texto)) {
@@ -1292,7 +1468,7 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
     const cantidad = Number(cantidadStr);
     const descripcion = await descripcionDe(sesion, codigo);
     if (eles.length === 0) {
-      await agregarItemAlCarrito(telefono, sesion, codigo, descripcion, cantidad);
+      await agregarItemAlCarrito(telefono, sesion, codigo, descripcion, cantidad, undefined, await infoVentaDe(sesion, codigo));
       return;
     }
     const [e1 = "", e2 = "", e3 = ""] = eles;
@@ -1302,7 +1478,15 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
       await mostrarDetalleArticulo(telefono, sesion, codigo, descripcion);
       return;
     }
-    await agregarItemAlCarrito(telefono, sesion, codigo, descripcion, cantidad, variante);
+    await agregarItemAlCarrito(
+      telefono,
+      sesion,
+      codigo,
+      descripcion,
+      cantidad,
+      variante,
+      await infoVentaDe(sesion, codigo, variante)
+    );
     return;
   }
 
@@ -1320,17 +1504,12 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
         return;
       }
     }
-    await actualizarSesion(telefono, {
-      estadoActual: "ESPERANDO_CANTIDAD",
-      contexto: {
-        ...contextoBase(sesion),
-        codigoPendiente: codigo,
-        descripcionPendiente: descripcion,
-        ...(variante && { variantePendiente: variante }),
-      },
-    });
-    const nombre = descripcionItem({ descripcion, descVariante: variante?.descVariante ?? "" });
-    await sendTextMessage(telefono, `Escribí la cantidad de ${nombre} que querés (ej: 12).`);
+    // Botón de fichas anteriores: la ficha actual ya pide escribir la cantidad.
+    try {
+      await mostrarFicha(telefono, sesion, codigo, descripcion, variante);
+    } catch (err) {
+      await avisarErrorConsulta(telefono, codigo, err);
+    }
     return;
   }
 
@@ -1408,7 +1587,8 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
   if (idOpcion.startsWith("ART_")) {
     const codigo = idOpcion.replace("ART_", "");
     const articulo = await obtenerArticulo(codigo);
-    await mostrarDetalleArticulo(telefono, sesion, codigo, articulo?.descripcion ?? codigo);
+    const ultimaBusqueda = sesion.contexto.ultimaBusqueda as string | undefined;
+    await mostrarDetalleArticulo(telefono, sesion, codigo, articulo?.descripcion ?? codigo, undefined, ultimaBusqueda);
     return;
   }
 
@@ -1432,12 +1612,13 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
         codigoPendiente: item.codigoArticulo,
         descripcionPendiente: item.descripcion,
         claveItemPendiente: clave,
+        unidadPendiente: item.unidad,
         editando: true,
       },
     });
     await sendTextMessage(
       telefono,
-      `Escribí la nueva cantidad de ${descripcionItem(item)} (ahora tenés ${formatearCantidad(item.cantidad)}).`
+      `Escribí la nueva cantidad de ${descripcionItem(item)} (ahora tenés ${cantidadConNombre(item.cantidad, unidadDe(item.unidad))}).`
     );
     return;
   }
