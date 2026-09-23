@@ -156,8 +156,31 @@ model BejArticulo {
   comprasDetalle BejCompraDet[]
   listaPrecios   BejListaPrecio[]
   npDetalle      BejNPDet[]
+  variantes      BejArticuloVariante[]
 
   @@map("bej_articulos")
+}
+
+// Una fila por variante vendible (art_CircVta = 1 y CodEle1 no vacío): en
+// Bejerman, Articulos tiene una fila por CodGen+CodEle1+CodEle2+CodEle3
+// (ej. HOJ = medida, ROP = talle y color). bej_articulos solo guarda la fila
+// genérica (art_Gen = 1). Los CodEle se guardan con trim ('' si vacío; en
+// Bejerman vienen como ' '). Reemplazo total en cada corrida del ETL.
+model BejArticuloVariante {
+  codGen    String      @db.VarChar(20) // art_CodGen
+  articulo  BejArticulo @relation(fields: [codGen], references: [codigo], onDelete: Cascade)
+  codEle1   String      @db.VarChar(10) // art_CodEle1 (varchar(6) en Bejerman)
+  codEle2   String      @db.VarChar(10)
+  codEle3   String      @db.VarChar(10)
+  desc1     String      @db.VarChar(50) // artele_Desc1 (varchar(15) en Bejerman), ej. '2.40'
+  desc2     String      @db.VarChar(50)
+  desc3     String      @db.VarChar(50)
+  precioFin Decimal?    @db.Decimal(15, 2) // ListaPrec 'FIN' de la variante; null si no tiene o es 0
+  updatedAt DateTime // momento de la sincronización
+
+  @@id([codGen, codEle1, codEle2, codEle3])
+  @@index([codGen])
+  @@map("bej_articulo_variantes")
 }
 
 // ─── Bejerman: Ventas ─────────────────────────────────────────────────────────

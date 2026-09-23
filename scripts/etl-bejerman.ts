@@ -357,6 +357,99 @@ async function etlListaPrecios(pool: pkg.ConnectionPool) {
     throw err;
   }
 }
+
+// ─── ETL: Variantes de artículos ──────────────────────────────────────────────
+// En Bejerman, Articulos tiene una fila por variante (CodGen+CodEle1+CodEle2+
+// CodEle3), pero bej_articulos solo guarda la genérica (art_Gen = 1). Acá van
+// las variantes vendibles con su precio de la lista FIN (nunca SIV: esto lo
+// lee el chatbot). La clave se compara con LTRIM/RTRIM/ISNULL porque los
+// CodEle vacíos vienen como ' ' (y alguno puede venir NULL).
+
+interface FilaVariante {
+  codGen: string;
+  codEle1: string;
+  codEle2: string;
+  codEle3: string;
+  desc1: string;
+  desc2: string;
+  desc3: string;
+  precioFin: number | null; // lpr_Precio es float en Bejerman
+}
+
+async function etlVariantes(pool: pkg.ConnectionPool) {
+  const inicio = Date.now();
+  console.log('\n🧩 Sincronizando Variantes de artículos...');
+  try {
+    const result = await pool.request().query(`
+      SELECT
+        LTRIM(RTRIM(a.art_CodGen))                    AS codGen,
+        LTRIM(RTRIM(ISNULL(a.art_CodEle1, '')))       AS codEle1,
+        LTRIM(RTRIM(ISNULL(a.art_CodEle2, '')))       AS codEle2,
+        LTRIM(RTRIM(ISNULL(a.art_CodEle3, '')))       AS codEle3,
+        LTRIM(RTRIM(ISNULL(a.artele_Desc1, '')))      AS desc1,
+        LTRIM(RTRIM(ISNULL(a.artele_Desc2, '')))      AS desc2,
+        LTRIM(RTRIM(ISNULL(a.artele_Desc3, '')))      AS desc3,
+        l.lpr_Precio                                  AS precioFin
+      FROM Articulos a
+      LEFT JOIN ListaPrec l
+        ON  l.lprdlp_Cod = 'FIN'
+        AND l.lprart_CodGen = a.art_CodGen
+        AND LTRIM(RTRIM(ISNULL(l.lprart_CodEle1, ''))) = LTRIM(RTRIM(ISNULL(a.art_CodEle1, '')))
+        AND LTRIM(RTRIM(ISNULL(l.lprart_CodEle2, ''))) = LTRIM(RTRIM(ISNULL(a.art_CodEle2, '')))
+        AND LTRIM(RTRIM(ISNULL(l.lprart_CodEle3, ''))) = LTRIM(RTRIM(ISNULL(a.art_CodEle3, '')))
+      WHERE a.art_CircVta = 1
+        AND LTRIM(RTRIM(ISNULL(a.art_CodEle1, ''))) <> ''
+    `);
+
+    // La FK exige que el CodGen esté en bej_articulos (que solo trae art_Gen = 1).
+    // Hoy todas las variantes vendibles tienen su genérica, pero si aparece una
+    // huérfana se saltea en vez de romper el ETL. También se deduplica por clave
+    // por si ListaPrec llegara a tener dos filas FIN para la misma variante.
+    const codigosExistentes = new Set(
+      (await prisma.bejArticulo.findMany({ select: { codigo: true } })).map(a => a.codigo)
+    );
+    const porClave = new Map<string, FilaVariante>();
+    let huerfanas = 0;
+    for (const row of result.recordset as FilaVariante[]) {
+      if (!row.codGen || !codigosExistentes.has(row.codGen)) { huerfanas++; continue; }
+      const clave = `${row.codGen}~${row.codEle1}~${row.codEle2}~${row.codEle3}`;
+      if (!porClave.has(clave)) porClave.set(clave, row);
+    }
+    const variantes = [...porClave.values()];
+    if (huerfanas > 0) console.log(`  ⚠️  ${huerfanas} variantes sin artículo genérico en bej_articulos (salteadas)`);
+
+    // Reemplazo total dentro de una transacción: así el bot nunca ve la tabla
+    // vacía a mitad de la sincronización.
+    const ahora = new Date();
+    await prisma.$transaction(async (tx) => {
+      await tx.bejArticuloVariante.deleteMany();
+      await procesarEnLotes(variantes, 500, async (lote) => {
+        await tx.bejArticuloVariante.createMany({
+          data: lote.map(row => ({
+            codGen: row.codGen,
+            codEle1: row.codEle1,
+            codEle2: row.codEle2,
+            codEle3: row.codEle3,
+            desc1: row.desc1,
+            desc2: row.desc2,
+            desc3: row.desc3,
+            // Precio 0 o sin precio en FIN → null (no ofrecer precio en $0)
+            precioFin: row.precioFin != null && Number(row.precioFin) > 0
+              ? Math.round(Number(row.precioFin) * 100) / 100
+              : null,
+            updatedAt: ahora,
+          })),
+        });
+      });
+    }, { timeout: 60_000 });
+
+    await logETL('articulo_variantes', variantes.length, Date.now() - inicio, 'ok');
+    console.log(`  ✅ ${variantes.length} variantes sincronizadas`);
+  } catch (err) {
+    await logETL('articulo_variantes', 0, Date.now() - inicio, 'error', err instanceof Error ? err.message : String(err));
+    throw err;
+  }
+}
 async function etlCompras(pool: pkg.ConnectionPool, desdeFecha: Date) {
   const inicio = Date.now();
   console.log(`\n🛒 Sincronizando Compras desde ${desdeFecha.toLocaleDateString()}...`);
@@ -594,6 +687,10 @@ async function main() {
     await etlCompras(pool, desdeFecha);
     await etlFormulas(pool);
     await etlListaPrecios(pool);
+    // Después de artículos (FK a bej_articulos). Va al final para que, si
+    // falla (ej. migración add_articulo_variantes sin aplicar), no frene el
+    // resto de la sincronización.
+    await etlVariantes(pool);
 
     console.log('\n✅ ETL completado exitosamente');
   } catch (err) {

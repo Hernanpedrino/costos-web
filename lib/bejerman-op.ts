@@ -70,7 +70,7 @@ const pad8 = (n: number) => String(n).padStart(8, "0")
 const q = (v: string | null | undefined) => (v ?? "").replace(/'/g, "''")
 
 /** Bejerman guarda estos flags como '1'/'0', 'S'/'N' o bit segun la columna */
-const esFlagSi = (v: unknown): boolean => {
+export const esFlagSi = (v: unknown): boolean => {
   const t = String(v ?? "").trim().toUpperCase()
   return t === "1" || t === "S" || t === "TRUE" || t === "SI"
 }
