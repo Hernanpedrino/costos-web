@@ -61,6 +61,7 @@ export type ConversationState =
   | "ESPERANDO_NOMBRE_LOCAL"
   | "ESPERANDO_NOMBRE_PERSONA"
   | "ESPERANDO_DIRECCION"
+  | "ESPERANDO_LOCALIDAD" // reparto con dirección escrita sin localidad reconocible
   | "ESPERANDO_CONFIRMACION"
   | "CONSULTA_LIBRE"
   | "ESPERANDO_ASUNTO_ATENCION" // "Hablar con persona": eligiendo el tema

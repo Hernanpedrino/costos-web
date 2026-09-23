@@ -133,32 +133,11 @@ export function normalizarBusqueda(textoUsuario: string): string[][] {
  */
 export async function buscarArticulos(
   textoUsuario: string,
-  limite = 8
+  limite = 8,
+  rubro?: string
 ): Promise<ResultadoBusqueda> {
-  const grupos = normalizarBusqueda(textoUsuario);
-
-  if (grupos.length === 0) return { articulos: [], totalCoincidencias: 0 };
-
-  // Solo artículos vendibles — no tiene sentido ofrecer insumos internos.
-  const where = {
-    esVendido: true,
-    AND: grupos.map((formas) => ({
-      OR: formas.flatMap((forma) => [
-        { descripcion: { contains: forma } },
-        {
-          variantes: {
-            some: {
-              OR: [
-                { desc1: { contains: forma } },
-                { desc2: { contains: forma } },
-                { desc3: { contains: forma } },
-              ],
-            },
-          },
-        },
-      ]),
-    })),
-  };
+  const where = whereBusqueda(textoUsuario, rubro);
+  if (!where) return { articulos: [], totalCoincidencias: 0 };
 
   const [encontrados, totalCoincidencias] = await Promise.all([
     prisma.bejArticulo.findMany({
@@ -176,6 +155,89 @@ export async function buscarArticulos(
   }));
 
   return { articulos, totalCoincidencias };
+}
+
+/**
+ * Rubros del catálogo. Bejerman no tiene un campo de rubro en Articulos (la
+ * tabla Rubro es contable y Grupos está vacía): el rubro es el prefijo del
+ * código. Los nombres siguen las categorías de la tienda online vieja
+ * (TQ_Rubros). Títulos ≤ 24 caracteres (filas de lista de WhatsApp).
+ */
+export const RUBROS: Record<string, string> = {
+  ADI: "Aditivos",
+  BAN: "Bandejas y bazar",
+  CHA: "Chairas",
+  CUC: "Cuchillería",
+  DIS: "Discos y cuchillas",
+  EMB: "Embudos",
+  ESP: "Especias",
+  FSL: "Frutas y semillas",
+  GAN: "Ganchos",
+  HIL: "Hilos",
+  HOJ: "Hojas de sierra",
+  INS: "Insumos",
+  MAQ: "Máquinas",
+  PIE: "Piedras de afilar",
+  RED: "Sintéticos, papel, redes",
+  REG: "Regalos",
+  REP: "Repuestos",
+  ROP: "Ropa de trabajo",
+  TAB: "Tablas",
+  TRI: "Tripas naturales",
+  VAI: "Vainas",
+  VAR: "Varios",
+};
+
+/** Prefijo de rubro de un código ("ADI1000013" → "ADI"). */
+export const rubroDe = (codigo: string) => codigo.slice(0, 3).toUpperCase();
+
+/** Nombre del rubro para mostrar ("ADI" → "Aditivos"); el prefijo si no está en la tabla. */
+export const nombreRubro = (prefijo: string) => RUBROS[prefijo] ?? prefijo;
+
+/**
+ * Cuántas coincidencias de la búsqueda hay en cada rubro, de mayor a menor.
+ * Sirve para ofrecer primero el rubro cuando la búsqueda mezcla cosas muy
+ * distintas ("hamburguesa": condimentos, moldes y papel).
+ */
+export async function contarPorRubro(textoUsuario: string): Promise<{ rubro: string; cantidad: number }[]> {
+  const where = whereBusqueda(textoUsuario);
+  if (!where) return [];
+
+  const codigos = await prisma.bejArticulo.findMany({ where, select: { codigo: true } });
+  const conteo = new Map<string, number>();
+  for (const { codigo } of codigos) conteo.set(rubroDe(codigo), (conteo.get(rubroDe(codigo)) ?? 0) + 1);
+
+  return [...conteo.entries()]
+    .map(([rubro, cantidad]) => ({ rubro, cantidad }))
+    .sort((a, b) => b.cantidad - a.cantidad);
+}
+
+/** Filtro de Prisma de buscarArticulos; null si el texto no tiene palabras. */
+function whereBusqueda(textoUsuario: string, rubro?: string) {
+  const grupos = normalizarBusqueda(textoUsuario);
+  if (grupos.length === 0) return null;
+
+  // Solo artículos vendibles — no tiene sentido ofrecer insumos internos.
+  return {
+    esVendido: true,
+    ...(rubro ? { codigo: { startsWith: rubro } } : {}),
+    AND: grupos.map((formas) => ({
+      OR: formas.flatMap((forma) => [
+        { descripcion: { contains: forma } },
+        {
+          variantes: {
+            some: {
+              OR: [
+                { desc1: { contains: forma } },
+                { desc2: { contains: forma } },
+                { desc3: { contains: forma } },
+              ],
+            },
+          },
+        },
+      ]),
+    })),
+  };
 }
 
 /**
@@ -253,8 +315,8 @@ export interface PalabraDistintiva {
 // Palabras demasiado genéricas como para servir de filtro (conectores,
 // unidades sueltas, etc.) — se excluyen aunque sean frecuentes.
 const STOPWORDS_FILTRO = new Set([
-  "X", "DE", "DEL", "LA", "EL", "LOS", "LAS", "PARA", "CON", "Y", "A", "EN",
-  "KG", "GR", "GRS", "UN", "UNA", "UNI", "C", "S",
+  "X", "DE", "DEL", "LA", "EL", "LOS", "LAS", "PARA", "CON", "Y", "A", "EN", "POR", "SIN",
+  "KG", "GR", "GRS", "UN", "UNA", "UNI", "C", "S", "CM", "MM", "MT", "MTS", "LT", "CC", "N", "NRO",
 ]);
 
 /**
@@ -273,7 +335,13 @@ export function obtenerPalabrasDistintivas(
   textoBusqueda: string,
   maxPalabras = 8
 ): PalabraDistintiva[] {
-  const palabrasBusqueda = new Set(textoBusqueda.trim().toUpperCase().split(/\s+/).filter(Boolean));
+  // Formas ya buscadas ("hamburguesas" → "hamburguesa"): la misma palabra en
+  // singular o plural no sirve de filtro.
+  const formasBuscadas = normalizarBusqueda(textoBusqueda).flat();
+  const yaBuscada = (palabra: string) => {
+    const p = sinAcentos(palabra.toLowerCase());
+    return formasBuscadas.some((f) => p === f || (f.length >= 4 && p.startsWith(f)));
+  };
   const conteo = new Map<string, number>();
 
   for (const art of articulos) {
@@ -281,7 +349,10 @@ export function obtenerPalabrasDistintivas(
     for (const cruda of art.descripcion.toUpperCase().split(/\s+/)) {
       const palabra = cruda.replace(/[^A-Z0-9ÁÉÍÓÚÑ/]/g, "");
       if (palabra.length < 2) continue;
-      if (palabrasBusqueda.has(palabra) || STOPWORDS_FILTRO.has(palabra)) continue;
+      if (yaBuscada(palabra) || STOPWORDS_FILTRO.has(palabra)) continue;
+      // Números sueltos ("25", "10") no dicen nada sin su unidad; los
+      // códigos largos ("000", "3360") sí pueden servir.
+      if (/^\d{1,2}$/.test(palabra)) continue;
       if (vistasEnEsteArticulo.has(palabra)) continue; // contar 1 vez por artículo
       vistasEnEsteArticulo.add(palabra);
       conteo.set(palabra, (conteo.get(palabra) ?? 0) + 1);

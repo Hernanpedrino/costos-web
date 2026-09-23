@@ -8,6 +8,9 @@ import {
   obtenerArticulo,
   obtenerPalabrasDistintivas,
   normalizarBusqueda,
+  contarPorRubro,
+  nombreRubro,
+  rubroDe,
   obtenerVariantes,
   type VarianteArticulo,
 } from "./bejerman-lookup";
@@ -26,6 +29,8 @@ type DatosEntrega =
       nombreLocal?: string;
       nombrePersona?: string;
       direccion?: string;
+      /** Localidad de la zona de reparto (Rosario, Funes, …): sin ella no hay reparto. */
+      localidad?: string;
       /** Si la mandó desde el mapa de WhatsApp. */
       ubicacion?: { lat: number; lng: number };
     };
@@ -188,7 +193,7 @@ function contextoBase(sesion: Sesion): Record<string, unknown> {
 /** True si ya están todos los datos que necesita el tipo de entrega elegido. */
 function entregaCompleta(datos: DatosEntrega | undefined): datos is DatosEntrega {
   if (!datos?.nombrePersona) return false;
-  if (datos.tipo === "REPARTO") return !!datos.nombreLocal && !!datos.direccion;
+  if (datos.tipo === "REPARTO") return !!datos.nombreLocal && !!datos.direccion && !!datos.localidad;
   return true;
 }
 
@@ -201,10 +206,15 @@ function textoEntrega(datos: DatosEntrega): string {
     return `Envío por transporte (a coordinar con nuestro equipo) — A nombre de: ${datos.nombrePersona}.`;
   }
   const { etiqueta } = calcularFechaEntrega();
+  // La localidad se agrega si la dirección no la nombra ya ("Colón 1357, Rosario").
+  const direccion =
+    datos.localidad && localidadEnTexto(datos.direccion ?? "") !== datos.localidad
+      ? `${datos.direccion}, ${datos.localidad}`
+      : datos.direccion;
   return (
     `Envío a: ${datos.nombreLocal}\n` +
     `Att: ${datos.nombrePersona}\n` +
-    `Dirección: ${datos.direccion}\n` +
+    `Dirección: ${direccion}\n` +
     (datos.ubicacion ? `Mapa: ${linkMapa(datos.ubicacion)}\n` : "") +
     `Reparto estimado: ${etiqueta}`
   );
@@ -392,6 +402,10 @@ async function manejarTextoLibre(telefono: string, texto: string, sesion: Sesion
     await procesarDireccion(telefono, texto, sesion);
     return;
   }
+  if (sesion.estadoActual === "ESPERANDO_LOCALIDAD") {
+    await aplicarLocalidad(telefono, sesion, localidadEnTexto(texto));
+    return;
+  }
 
   // Un número suelto sin artículo elegido no sirve como búsqueda.
   if (interpretarCantidad(texto) !== null) {
@@ -420,19 +434,22 @@ async function irAlMenu(telefono: string, sesion: Sesion) {
 
 /**
  * Busca artículos por texto y decide qué mostrar según cuántas coincidencias
- * haya. Está separada de manejarTextoLibre porque también se llama de forma
- * recursiva cuando el usuario elige una palabra para refinar la búsqueda.
+ * haya. Se llama también al elegir un rubro (RUBRO|) o una palabra de filtro
+ * (FILTRO|) para acotar una búsqueda con demasiados resultados.
+ *
+ * Con muchas coincidencias, primero se ofrece el rubro si están mezclados
+ * ("hamburguesa": condimentos, moldes, papel) y después palabras de filtro.
  */
-async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto: string) {
+async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto: string, rubro?: string) {
   // Una búsqueda nueva descarta el artículo que estaba esperando cantidad o
   // variante: si no, un "3" escrito después se sumaba al artículo anterior.
   if (sesion.estadoActual === "ESPERANDO_CANTIDAD" || sesion.estadoActual === "ESPERANDO_VARIANTE") {
     await actualizarSesion(telefono, { estadoActual: "ARMANDO_PEDIDO", contexto: contextoBase(sesion) });
   }
 
-  const { articulos, totalCoincidencias } = await buscarArticulos(texto, MAX_RESULTADOS_LISTA);
+  const { articulos, totalCoincidencias } = await buscarArticulos(texto, MAX_RESULTADOS_LISTA, rubro);
   // Lo que se buscó de verdad, sin "necesito", "de", plurales: "disco picadora".
-  const buscado = textoBuscado(texto);
+  const buscado = textoBuscado(texto) + (rubro ? ` en ${nombreRubro(rubro)}` : "");
 
   if (totalCoincidencias === 0) {
     await sendTextMessage(
@@ -452,11 +469,38 @@ async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto:
   // medida o talle que ya escribió ("hoja 2.95") no se le vuelva a pedir.
   await actualizarSesion(telefono, { contexto: { ...contextoBase(sesion), ultimaBusqueda: texto } });
 
+  // Los ids llevan el texto del cliente: se recorta para no pasar los 200.
+  const textoId = texto.slice(0, 140);
+
   if (totalCoincidencias > MAX_RESULTADOS_LISTA) {
-    // Demasiadas coincidencias: en vez de listar una parte al azar, traemos
-    // una muestra más grande para ver qué palabras las diferencian
-    // (ej. "FINO"/"MEDIO"/"GRUESO", "1KG"/"5KG") y las ofrecemos como filtro.
-    const muestra = await buscarArticulos(texto, MUESTRA_PARA_ANALISIS);
+    // Mezcla de rubros: primero que elija qué tipo de producto busca.
+    if (!rubro) {
+      const rubros = await contarPorRubro(texto);
+      if (rubros.length >= 2) {
+        const visibles = rubros.slice(0, MAX_FILAS_LISTA);
+        await sendList(
+          telefono,
+          `Hay ${totalCoincidencias} productos para "${buscado}" en ${rubros.length} rubros. ¿Qué tipo de producto buscás?` +
+            (rubros.length > visibles.length ? " (O escribí una búsqueda más precisa.)" : ""),
+          "Elegir rubro",
+          [
+            {
+              title: "Rubros",
+              rows: visibles.map((r) => ({
+                id: `RUBRO|${r.rubro}|${textoId}`,
+                title: truncar(nombreRubro(r.rubro), LARGO_TITULO_FILA),
+                description: `${r.cantidad} producto${r.cantidad === 1 ? "" : "s"}`,
+              })),
+            },
+          ]
+        );
+        return;
+      }
+    }
+
+    // Un solo rubro (o ya elegido): palabras que diferencian los resultados
+    // (ej. "FINO"/"MEDIO"/"GRUESO", "CONDIMENTO"/"INTEGRAL").
+    const muestra = await buscarArticulos(texto, MUESTRA_PARA_ANALISIS, rubro);
     const palabras = obtenerPalabrasDistintivas(muestra.articulos, texto);
 
     if (palabras.length === 0) {
@@ -477,8 +521,7 @@ async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto:
         {
           title: "Filtros sugeridos",
           rows: palabras.map((p) => ({
-            // El id admite 200 caracteres: se recorta el texto del cliente
-            id: `REFINAR|${p.palabra}|${texto.slice(0, 150)}`,
+            id: `FILTRO|${rubro ?? ""}|${p.palabra}|${textoId}`,
             title: truncar(p.palabra, LARGO_TITULO_FILA),
             description: `${p.cantidad} productos`,
           })),
@@ -489,9 +532,11 @@ async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto:
   }
 
   // Pocas coincidencias: lista con la descripción como título (el código no
-  // le dice nada al cliente) y el precio abajo.
+  // le dice nada al cliente) y el precio abajo. Si mezclan rubros, el rubro
+  // también va abajo, para distinguir el condimento del molde.
   const precios = await consultarPrecios(articulos.map((a) => a.codigo));
   const titulos = titulosDistintivos(articulos.map((a) => a.descripcion));
+  const mezclaRubros = new Set(articulos.map((a) => rubroDe(a.codigo))).size > 1;
 
   await sendList(telefono, `Encontré ${totalCoincidencias} opciones para "${buscado}". Tocá "Ver opciones" y elegí una:`, "Ver opciones", [
     {
@@ -499,6 +544,7 @@ async function realizarBusquedaArticulo(telefono: string, sesion: Sesion, texto:
       rows: articulos.map((r, i) => {
         // Si la descripción no entra en el título, va completa abajo junto al precio.
         const partes = [
+          mezclaRubros ? nombreRubro(rubroDe(r.codigo)) : null,
           r.descripcion.length > LARGO_TITULO_FILA ? r.descripcion : null,
           formatearPrecio(precios.get(r.codigo)),
         ].filter(Boolean);
@@ -1454,21 +1500,39 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
     return;
   }
 
-  if (idOpcion === "TRANSPORTE") {
+  if (idOpcion === "TRANSPORTE" || idOpcion === "RETIRO") {
+    // Si venía de un reparto fuera de zona, el nombre ya se cargó: no se pide de nuevo.
+    const nombrePersona = obtenerDatosEntrega(sesion)?.nombrePersona;
+    if (nombrePersona) {
+      await continuarTrasEntrega(telefono, sesion, { tipo: idOpcion, nombrePersona });
+      return;
+    }
     await actualizarSesion(telefono, {
       estadoActual: "ESPERANDO_NOMBRE_PERSONA",
-      contexto: { datosEntrega: { tipo: "TRANSPORTE" } },
+      contexto: { datosEntrega: { tipo: idOpcion } },
     });
-    await sendTextMessage(telefono, "¿A nombre de quién hacemos el pedido?");
+    await sendTextMessage(
+      telefono,
+      idOpcion === "TRANSPORTE" ? "¿A nombre de quién hacemos el pedido?" : "¿A nombre de quién retira el pedido?"
+    );
     return;
   }
 
-  if (idOpcion === "RETIRO") {
-    await actualizarSesion(telefono, {
-      estadoActual: "ESPERANDO_NOMBRE_PERSONA",
-      contexto: { datosEntrega: { tipo: "RETIRO" } },
+  // Localidad elegida para el reparto: "LOC|<id>" o "LOC|OTRA"
+  if (idOpcion.startsWith("LOC|")) {
+    const localidad = ZONA_REPARTO.find((l) => l.id === idOpcion.replace("LOC|", ""))?.nombre ?? null;
+    await aplicarLocalidad(telefono, sesion, localidad);
+    return;
+  }
+
+  // Fuera de zona: corregir la dirección (conserva local y nombre)
+  if (idOpcion === "CAMBIAR_DIRECCION") {
+    const previo = obtenerDatosEntrega(sesion);
+    await pedirDireccion(telefono, {
+      tipo: "REPARTO",
+      nombreLocal: previo?.tipo === "REPARTO" ? previo.nombreLocal : undefined,
+      nombrePersona: previo?.nombrePersona,
     });
-    await sendTextMessage(telefono, "¿A nombre de quién retira el pedido?");
     return;
   }
 
@@ -1614,7 +1678,21 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
     return;
   }
 
-  // Filtro elegido para acotar una búsqueda con demasiados resultados:
+  // Rubro elegido para una búsqueda que mezclaba rubros: "RUBRO|<prefijo>|<texto>"
+  if (idOpcion.startsWith("RUBRO|")) {
+    const [, rubro, ...resto] = idOpcion.split("|");
+    await realizarBusquedaArticulo(telefono, sesion, resto.join("|"), rubro || undefined);
+    return;
+  }
+
+  // Palabra elegida para acotar: "FILTRO|<rubro o vacío>|<palabra>|<texto>"
+  if (idOpcion.startsWith("FILTRO|")) {
+    const [, rubro, palabra, ...resto] = idOpcion.split("|");
+    await realizarBusquedaArticulo(telefono, sesion, `${resto.join("|")} ${palabra}`, rubro || undefined);
+    return;
+  }
+
+  // Formato anterior de los filtros (mensajes viejos):
   // "REFINAR|<palabra>|<textoOriginal>"
   if (idOpcion.startsWith("REFINAR|")) {
     const partes = idOpcion.split("|");
@@ -1815,10 +1893,16 @@ async function manejarUbicacion(
   const ubicacion = { lat: location.latitude, lng: location.longitude };
   const direccionMapa = [location.name, location.address].filter(Boolean).join(" — ");
 
-  if (sesion.estadoActual === "ESPERANDO_DIRECCION") {
+  if (sesion.estadoActual === "ESPERANDO_DIRECCION" || sesion.estadoActual === "ESPERANDO_LOCALIDAD") {
+    const localidad = localidadPorUbicacion(ubicacion.lat, ubicacion.lng);
+    if (!localidad) {
+      await ofrecerFueraDeZona(telefono, sesion);
+      return;
+    }
     const datosEntrega = {
       ...(obtenerDatosEntrega(sesion) as object),
       direccion: direccionMapa || "Ubicación enviada desde el mapa",
+      localidad,
       ubicacion,
     } as DatosEntrega;
     await continuarTrasEntrega(telefono, sesion, datosEntrega);
@@ -1851,29 +1935,116 @@ async function procesarNombrePersona(telefono: string, texto: string, sesion: Se
   const datosEntrega = { ...(obtenerDatosEntrega(sesion) as object), nombrePersona: texto.trim() } as DatosEntrega;
 
   if (datosEntrega.tipo === "REPARTO") {
-    await actualizarSesion(telefono, { estadoActual: "ESPERANDO_DIRECCION", contexto: { datosEntrega } });
-    try {
-      await sendLocationRequest(
-        telefono,
-        "¿Cuál es la dirección de entrega? Tocá *Enviar ubicación* para marcarla en el mapa, o escribila (calle, número y localidad)."
-      );
-    } catch (err) {
-      // Si Meta rechaza el botón de ubicación, se pide igual por texto.
-      console.error("[whatsapp] No se pudo pedir la ubicación con botón:", err);
-      await sendTextMessage(
-        telefono,
-        "¿Cuál es la dirección de entrega? Escribila (calle, número y localidad) o mandá tu ubicación desde 📎 → Ubicación."
-      );
-    }
+    await pedirDireccion(telefono, datosEntrega);
     return;
   }
 
   await continuarTrasEntrega(telefono, sesion, datosEntrega);
 }
 
+/** Pide la dirección de reparto: botón "Enviar ubicación" o escribirla. */
+async function pedirDireccion(telefono: string, datosEntrega: DatosEntrega) {
+  await actualizarSesion(telefono, { estadoActual: "ESPERANDO_DIRECCION", contexto: { datosEntrega } });
+  try {
+    await sendLocationRequest(
+      telefono,
+      "¿Cuál es la dirección de entrega? Tocá *Enviar ubicación* para marcarla en el mapa, o escribila (calle, número y localidad)."
+    );
+  } catch (err) {
+    // Si Meta rechaza el botón de ubicación, se pide igual por texto.
+    console.error("[whatsapp] No se pudo pedir la ubicación con botón:", err);
+    await sendTextMessage(
+      telefono,
+      "¿Cuál es la dirección de entrega? Escribila (calle, número y localidad) o mandá tu ubicación desde 📎 → Ubicación."
+    );
+  }
+}
+
+// ---- Zona de reparto ----
+//
+// El reparto solo llega a estas localidades; fuera de ellas corresponde envío
+// por transporte o retiro en el local. Con ubicación del mapa se valida por
+// distancia al centro de cada una (radio aproximado de su planta urbana); con
+// dirección escrita, por el nombre de la localidad (o se pregunta).
+
+const ZONA_REPARTO = [
+  { id: "ROS", nombre: "Rosario", lat: -32.9468, lng: -60.6393, radioKm: 11, patron: /\brosario\b/ },
+  { id: "FUN", nombre: "Funes", lat: -32.9175, lng: -60.8095, radioKm: 5, patron: /\bfunes\b/ },
+  { id: "ROL", nombre: "Roldán", lat: -32.897, lng: -60.907, radioKm: 5, patron: /\broldan\b/ },
+  { id: "BAI", nombre: "Granadero Baigorria", lat: -32.857, lng: -60.716, radioKm: 4, patron: /\bbaigorria\b/ },
+  {
+    id: "VGG",
+    nombre: "Villa Gobernador Gálvez",
+    lat: -33.03,
+    lng: -60.633,
+    radioKm: 5,
+    patron: /\bgalvez\b|\bvgg\b/,
+  },
+];
+
+const LOCALIDADES_REPARTO = "Rosario, Funes, Roldán, Granadero Baigorria y Villa Gobernador Gálvez";
+
+/** Localidad de la zona mencionada en un texto ("Colón 1357, Rosario"), o null. */
+function localidadEnTexto(texto: string): string | null {
+  const t = sinAcentosMayus(texto).toLowerCase();
+  return ZONA_REPARTO.find((l) => l.patron.test(t))?.nombre ?? null;
+}
+
+/** Localidad de la zona que contiene la ubicación, o null si queda afuera. */
+function localidadPorUbicacion(lat: number, lng: number): string | null {
+  const km = (l: { lat: number; lng: number }) => {
+    // Equirectangular: sobra precisión para distancias de pocos km.
+    const x = ((lng - l.lng) * Math.PI) / 180 * Math.cos((((lat + l.lat) / 2) * Math.PI) / 180);
+    const y = ((lat - l.lat) * Math.PI) / 180;
+    return Math.sqrt(x * x + y * y) * 6371;
+  };
+  return ZONA_REPARTO.find((l) => km(l) <= l.radioKm)?.nombre ?? null;
+}
+
+/** Dirección escrita: si nombra una localidad de la zona se acepta; si no, se pregunta cuál. */
 async function procesarDireccion(telefono: string, texto: string, sesion: Sesion) {
-  const datosEntrega = { ...(obtenerDatosEntrega(sesion) as object), direccion: texto.trim() } as DatosEntrega;
-  await continuarTrasEntrega(telefono, sesion, datosEntrega);
+  const direccion = texto.trim();
+  const datosEntrega = { ...(obtenerDatosEntrega(sesion) as object), direccion } as DatosEntrega;
+  const localidad = localidadEnTexto(direccion);
+  if (localidad) {
+    await continuarTrasEntrega(telefono, sesion, { ...datosEntrega, localidad } as DatosEntrega);
+    return;
+  }
+  await actualizarSesion(telefono, { estadoActual: "ESPERANDO_LOCALIDAD", contexto: { datosEntrega } });
+  await sendList(telefono, "¿En qué localidad es la entrega?", "Elegir localidad", [
+    {
+      title: "Localidades",
+      rows: [
+        ...ZONA_REPARTO.map((l) => ({ id: `LOC|${l.id}`, title: truncar(l.nombre, LARGO_TITULO_FILA) })),
+        { id: "LOC|OTRA", title: "Otra localidad" },
+      ],
+    },
+  ]);
+}
+
+/** Localidad elegida de la lista o escrita. Fuera de la zona → transporte o retiro. */
+async function aplicarLocalidad(telefono: string, sesion: Sesion, localidad: string | null) {
+  const datosEntrega = obtenerDatosEntrega(sesion);
+  if (!localidad || datosEntrega?.tipo !== "REPARTO") {
+    await ofrecerFueraDeZona(telefono, sesion);
+    return;
+  }
+  await continuarTrasEntrega(telefono, sesion, { ...datosEntrega, localidad });
+}
+
+/** El reparto no llega: se ofrece transporte, retiro o corregir la dirección. */
+async function ofrecerFueraDeZona(telefono: string, sesion: Sesion) {
+  await actualizarSesion(telefono, { estadoActual: "ESPERANDO_TIPO_ENTREGA", contexto: contextoBase(sesion) });
+  await sendButtons(
+    telefono,
+    `El reparto llega solo a ${LOCALIDADES_REPARTO}. ` +
+      "Para otras localidades te lo mandamos por transporte, o lo podés retirar en el local. ¿Cómo preferís?",
+    [
+      { id: "TRANSPORTE", title: "Envío por transporte" },
+      { id: "RETIRO", title: "Retiro en el local" },
+      { id: "CAMBIAR_DIRECCION", title: "Cambiar dirección" },
+    ]
+  );
 }
 
 /**
