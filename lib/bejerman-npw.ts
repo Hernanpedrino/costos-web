@@ -220,16 +220,10 @@ export async function crearNPW(pool: pkg.ConnectionPool, pedido: PedidoParaNPW, 
       `)
       const precio = Number(rPrecio.recordset[0]?.lpr_Precio ?? 0)
 
-      // Costo: precio de proveedor de la variante (el más reciente con valor);
-      // si no hay, el de la fila genérica; si tampoco, 0 (como hace Bejerman).
-      const rCosto = await consulta(tx, clave).query(`
-        SELECT TOP 1 apr_PrProv FROM ArtProv
-        WHERE aprart_CodGen = @cod AND apr_PrProv > 0
-          AND ((${ele("aprart_CodEle1")} = @e1 AND ${ele("aprart_CodEle2")} = @e2 AND ${ele("aprart_CodEle3")} = @e3)
-               OR (${ele("aprart_CodEle1")} = '' AND ${ele("aprart_CodEle2")} = '' AND ${ele("aprart_CodEle3")} = ''))
-        ORDER BY CASE WHEN ${ele("aprart_CodEle1")} = @e1 THEN 0 ELSE 1 END, apr_FecMod DESC
-      `)
-      const costo = Number(rCosto.recordset[0]?.apr_PrProv ?? 0)
+      // Costo: por ahora no se calcula (definido por Hernán, 29/09/2026). Cuando
+      // hay varios proveedores Bejerman no usa cualquier fila de ArtProv; queda
+      // para revisar más adelante.
+      const costo = 0
 
       const um2 = t(art.um2) || null
       const factor = Number(art.art_FactorConv) || 1

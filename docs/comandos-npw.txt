@@ -1,0 +1,144 @@
+===============================================================================
+ COSTOS-WEB — Comandos para ejecutar los scripts
+ Distribuidora El Chilo SRL — actualizado el 29/09/2026
+===============================================================================
+
+Todos los comandos se corren desde la carpeta del proyecto:
+
+    cd C:\Users\Usuario\Documents\react\costos-web\costos-web
+
+Los resultados quedan también en la carpeta logs\ (un archivo por día).
+
+
+-------------------------------------------------------------------------------
+ 1. NOTAS DE PEDIDO DE WHATSAPP (NPW)
+-------------------------------------------------------------------------------
+Cada pedido que el cliente confirma en el chat queda guardado en MySQL
+(tabla whatsapp_pedidos). Si el cliente fue identificado, queda en estado
+"identificado" y listo para generar la NPW en Bejerman.
+
+IMPORTANTE: el script SIMULA por defecto. Solo graba en Bejerman si se le
+pasa --ejecutar.
+
+  Ver qué NPW generaría (no graba nada):
+      npx tsx scripts/crear-npw.ts
+
+  Ver un pedido puntual (no graba nada):
+      npx tsx scripts/crear-npw.ts --pedido=12
+
+  Grabar la NPW de un pedido en Bejerman:
+      npx tsx scripts/crear-npw.ts --ejecutar --pedido=12
+
+  Grabar todas las NPW pendientes:
+      npx tsx scripts/crear-npw.ts --ejecutar
+
+Recomendado: primero simular, revisar cliente, lista, renglones y totales, y
+recién ahí ejecutar ese pedido con --pedido=N.
+
+Log: logs\crear-npw-AAAA-MM-DD.log
+
+Qué hace con cada pedido:
+  - Datos del cliente, lista de precios, vendedor, zona, etc.: de su ficha
+    en Bejerman.
+  - Precios: de la lista del cliente (FIN con IVA / SIV sin IVA). Si un
+    artículo no tiene precio en esa lista, va con precio 0 y se avisa.
+  - Productos "a consultar" (cuchillos, repuestos, etc.): como leyendas.
+  - No mueve stock. El BP automático NO toma las NPW: el remito se hace a mano.
+  - Al grabar, el pedido pasa a "npw_creada" y guarda el número de NPW: no se
+    puede generar dos veces.
+
+Estados de los pedidos (tabla whatsapp_pedidos, columna estado):
+  identificado    cliente encontrado en Bejerman → listo para la NPW
+  pendiente_alta  no se lo pudo identificar → NO se genera NPW
+  npw_creada      NPW grabada (columna npwNumero)
+  error           falló al grabar (columna error: el motivo). Bejerman quedó
+                  sin cambios: la transacción se deshace entera.
+
+Casos manuales (desde MySQL Workbench, base "costos"):
+
+  Ver los pedidos:
+      SELECT id, telefono, estado, cliCod, cliRazSoc, npwNumero, error, creadoEn
+      FROM whatsapp_pedidos ORDER BY id DESC;
+
+  Reintentar un pedido que quedó en error (después de corregir la causa):
+      UPDATE whatsapp_pedidos SET estado = 'identificado', error = NULL WHERE id = 12;
+      -- y después: npx tsx scripts/crear-npw.ts --pedido=12  (simular) / --ejecutar
+
+  Cliente nuevo ya dado de alta en Bejerman (pedido en pendiente_alta):
+      UPDATE whatsapp_pedidos
+      SET estado = 'identificado', cliCod = '001234', cliRazSoc = 'RAZON SOCIAL'
+      WHERE id = 12;
+      -- y después simular / ejecutar como arriba.
+      -- Opcional, para que el chat lo reconozca la próxima vez:
+      INSERT INTO whatsapp_clientes (telefono, cliCod, cliRazSoc)
+      VALUES ('5493411234567', '001234', 'RAZON SOCIAL');
+
+
+-------------------------------------------------------------------------------
+ 2. CHATBOT: PROBAR SIN MANDAR NADA A META
+-------------------------------------------------------------------------------
+Simula una conversación completa (no manda mensajes ni mails reales; los
+imprime). Cada argumento es un paso: texto, #ID de botón/fila, o
+@lat,lng para una ubicación.
+
+      node node_modules/tsx/dist/cli.mjs --tsconfig tsconfig.json scripts/simular-chat.ts "hola" "#HACER_PEDIDO" "#RETIRO" "Juan" "harina 000" "2" "#FINALIZAR_PEDIDO"
+
+(Usar "node node_modules/tsx/dist/cli.mjs" en vez de "npx tsx" para que los
+acentos lleguen bien desde Git Bash.)
+
+
+-------------------------------------------------------------------------------
+ 3. MAIL
+-------------------------------------------------------------------------------
+  Probar que salen los mails (avisos de "Hablar con persona" y pedidos):
+      npx tsx scripts/probar-mail.ts
+
+
+-------------------------------------------------------------------------------
+ 4. BAJA AUTOMÁTICA DE NP (BP) — corre sola todos los días a las 6:30
+-------------------------------------------------------------------------------
+  Ver qué haría, sin grabar:
+      npx tsx scripts/baja-np-automatico.ts --dry-run
+
+  Correrla a mano (graba en Bejerman):
+      npx tsx scripts/baja-np-automatico.ts
+
+  Opciones: --dias=3 (días hacia atrás), --limite=5 (tope de NP)
+  Log: logs\baja-np-AAAA-MM-DD.log
+
+
+-------------------------------------------------------------------------------
+ 5. ÓRDENES DE PRODUCCIÓN (OP) DESDE LA PLANILLA
+-------------------------------------------------------------------------------
+Normalmente se generan con el botón de la planilla. Por script:
+
+  Ver qué haría, sin grabar:
+      npx tsx scripts/crear-op.ts --dry-run
+
+  Procesar la planilla de hoy / de otra fecha:
+      npx tsx scripts/crear-op.ts
+      npx tsx scripts/crear-op.ts --fecha=2026-09-15
+
+  Opciones: --limite=1, --dejar-abierta (no cierra la orden)
+  Log: logs\crear-op-AAAA-MM-DD.log
+
+
+-------------------------------------------------------------------------------
+ 6. ETL (Bejerman → MySQL) — corre sola con la tarea programada
+-------------------------------------------------------------------------------
+  Correrlo a mano (solo lee Bejerman; actualiza MySQL):
+      npx ts-node scripts/etl-bejerman.ts
+      npx ts-node scripts/etl-lili.ts
+
+  Log: logs\etl.log
+
+
+-------------------------------------------------------------------------------
+ 7. PUBLICAR CAMBIOS DE LA APP (después de actualizar el código)
+-------------------------------------------------------------------------------
+      npm run build
+      pm2 restart costos-web
+
+  Migraciones de base (solo cuando se agrega una tabla nueva):
+      npx prisma migrate deploy
+  NUNCA usar "prisma migrate dev" ni "prisma db push" contra esta base.

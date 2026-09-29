@@ -1,0 +1,221 @@
+===============================================================================
+ COSTOS-WEB + CHATBOT WHATSAPP
+ Checklist de migración al servidor virtual de Bejerman (192.168.1.230)
+ Distribuidora El Chilo SRL — armado el 24/09/2026
+===============================================================================
+
+Situación actual (PC 192.168.1.191)
+-----------------------------------
+- App Next.js 16 en PM2 (costos-web, puerto 3000) + Caddy HTTPS (costos-web-https).
+- MySQL 8.0 local, base "costos" (~37 MB).
+- Bejerman (SQL Server 2012, SBDACANE / SBDALILI) en 192.168.1.230.
+- Chatbot: Meta -> ngrok (sleep-striking-grower.ngrok-free.dev) -> localhost:3000.
+  ngrok corre en una ventana abierta a mano: si se cierra, el bot se cae.
+- Tareas programadas: "ETL Bejerman" y "Baja NP Bejerman" (6:30).
+- El repo local está 14 commits adelante de GitHub: hacer push antes de migrar.
+
+Ventaja de moverlo al servidor de Bejerman: la app queda al lado del ERP
+(consultas y transacciones sin pasar por la red) y no depende de una PC de
+escritorio. Contras a cuidar: comparte recursos con SQL Server y queda
+expuesto a internet un servidor crítico (solo por túnel saliente, ver sección 6).
+
+
+-------------------------------------------------------------------------------
+ 0. ANTES DE EMPEZAR (verificar el servidor)
+-------------------------------------------------------------------------------
+[ ] Versión de Windows del servidor virtual.
+      Next.js 16 necesita Node 20.9 o más nuevo, y Node 20+ solo tiene
+      soporte oficial en Windows Server 2016 o posterior.
+      Si el servidor es 2012 R2 o anterior -> NO migrar ahí: usar otra VM
+      (Server 2019/2022) en el mismo host, conectada a Bejerman por la LAN.
+[ ] RAM y CPU libres. SQL Server por defecto toma toda la memoria que puede.
+      Configurar "max server memory" en SQL Server dejando al menos 2-3 GB
+      para Node + MySQL + el sistema. (La app usa ~150 MB; el build de Next
+      llega a 1-2 GB por unos minutos.)
+[ ] Disco: ~2 GB para node_modules + .next + logs, más MySQL.
+[ ] Snapshot / backup de la VM antes de instalar nada.
+[ ] Coordinar una ventana de corte fuera de horario (el BP corre 6:30).
+
+
+-------------------------------------------------------------------------------
+ 1. SOFTWARE A INSTALAR EN EL SERVIDOR
+-------------------------------------------------------------------------------
+[ ] Node.js LTS (misma línea que hoy: v24.x) — instalar para todos los usuarios.
+[ ] Git (para clonar y actualizar desde GitHub).
+[ ] MySQL Server 8.0 (misma versión que hoy) + MySQL Workbench (opcional).
+      Escuchar solo en localhost (bind-address = 127.0.0.1).
+[ ] PM2 global:            npm install -g pm2
+[ ] PM2 como SERVICIO de Windows (importante en un servidor: nadie inicia
+      sesión, así que el arranque "al loguearse" que se usa hoy
+      (pm2-windows-startup) NO sirve). Opciones: pm2-installer o NSSM.
+[ ] pm2-logrotate:         pm2 install pm2-logrotate
+      (hoy el log de errores ya pesa 23 MB).
+[ ] Caddy (winget install CaddyServer.Caddy) — HTTPS para la red interna.
+[ ] Túnel para WhatsApp (ver sección 6): cloudflared o el agente oficial de
+      ngrok, instalado como servicio (NO "npx ngrok" en una ventana).
+
+
+-------------------------------------------------------------------------------
+ 2. CÓDIGO
+-------------------------------------------------------------------------------
+[ ] En la PC vieja: git push (hay 14 commits sin subir a GitHub).
+[ ] En el servidor: git clone https://github.com/Hernanpedrino/costos-web.git
+      en una ruta fija, por ejemplo C:\apps\costos-web
+[ ] npm ci
+[ ] npx prisma generate
+[ ] Copiar .env.local y .env de la PC vieja (por un medio seguro: tienen
+      claves de Bejerman, MySQL, Meta y SMTP; no por mail ni WhatsApp).
+[ ] Ajustar variables en .env.local:
+      - BEJERMAN_SERVER: localhost (o el nombre/instancia de SQL Server local).
+        Ídem LILI_SERVER.
+      - DATABASE_URL / DATABASE_HOST: MySQL local del servidor.
+      - NEXTAUTH_URL: https://192.168.1.230 (o el nombre DNS interno).
+      - AUTH_SECRET: se puede mantener (si se cambia, todos vuelven a loguearse).
+      - SMTP_* y MAIL_ATENCION: igual que hoy.
+      - WHATSAPP_*: ver sección 7.
+[ ] Rutas fijas a corregir (hoy apuntan a C:\Users\Usuario\...):
+      - ecosystem.config.cjs: cwd de costos-web y de Caddy, ruta de caddy.exe,
+        NEXTAUTH_URL.
+      - baja-np-runner.bat: variable PROYECTO.
+      - scripts\etl-runner.bat: cd /d ...
+      - Caddyfile: 192.168.1.191 -> IP/nombre nuevo, y la ruta del root.crt
+        (C:/Users/<usuario>/AppData/Roaming/Caddy/pki/...).
+[ ] npm run build (fuera de horario: consume CPU/RAM del servidor de Bejerman).
+
+
+-------------------------------------------------------------------------------
+ 3. BASE DE DATOS MYSQL "costos"
+-------------------------------------------------------------------------------
+Contiene dos tipos de datos:
+  - Copias de Bejerman (ventas, NP, compras, artículos, variantes, listas):
+    se regeneran con el ETL.
+  - Datos PROPIOS que no existen en otro lado y hay que llevar sí o sí:
+    usuarios, fórmulas, insumos, historiales de precio, costos operativos,
+    planillas de producción, registro de actividad, sesiones del chatbot.
+
+[ ] Crear la base y el usuario en el MySQL nuevo (mismos nombres que en .env).
+[ ] En la PC vieja, en el momento del corte (con la app detenida):
+      mysqldump -u <usuario> -p --single-transaction --routines --triggers costos > costos.sql
+[ ] En el servidor:   mysql -u <usuario> -p costos < costos.sql
+[ ] npx prisma migrate status   -> tiene que decir que no hay migraciones pendientes.
+      NUNCA usar "prisma migrate dev" ni "db push" contra esta base: las
+      tablas whatsapp_* se crearon con db push y migrate dev propondría
+      BORRAR TODO. Migraciones nuevas: escritas a mano + "prisma migrate deploy".
+[ ] Backup diario nuevo: tarea programada con mysqldump a otra carpeta/disco
+      (hoy no existe ninguno).
+
+
+-------------------------------------------------------------------------------
+ 4. PM2, CADDY Y HTTPS INTERNO
+-------------------------------------------------------------------------------
+[ ] pm2 start ecosystem.config.cjs   (costos-web + costos-web-https)
+      Mantener costos-web en UNA sola instancia (modo fork): la cola que
+      evita números de OP repetidos es en memoria.
+[ ] Si se agrega el túnel a PM2, sumarlo al ecosystem.
+[ ] pm2 save  (y verificar que el servicio de PM2 lo levante al reiniciar).
+[ ] Firewall de Windows: abrir 80/443 solo para la red interna (Caddy).
+      NO abrir 3000 ni 3306 ni 1433 hacia afuera.
+[ ] Caddy genera una CA interna NUEVA: reinstalar el certificado raíz
+      (https://<servidor>/root.crt) en las PCs y celulares que usan el sistema.
+[ ] Avisar a los usuarios la dirección nueva (https://192.168.1.230).
+
+
+-------------------------------------------------------------------------------
+ 5. TAREAS PROGRAMADAS (Programador de tareas)
+-------------------------------------------------------------------------------
+[ ] Crear en el servidor:
+      - ETL Bejerman        -> scripts\etl-runner.bat (mismo horario que hoy)
+      - Baja NP Bejerman    -> baja-np-runner.bat, diario 6:30
+[ ] Marcar "Ejecutar tanto si el usuario inició sesión como si no" y
+      "con los privilegios más altos"; directorio de inicio = carpeta del proyecto.
+[ ] !!! DESHABILITAR las dos tareas en la PC vieja ANTES de habilitarlas en
+      el servidor. Si corren en las dos máquinas se generan BP DUPLICADOS en
+      Bejerman.
+[ ] Probar a mano con --dry-run antes del primer 6:30:
+      npx tsx scripts\baja-np-automatico.ts --dry-run
+      npx tsx scripts\crear-op.ts --dry-run
+
+
+-------------------------------------------------------------------------------
+ 6. ENTRADA DESDE INTERNET PARA WHATSAPP (túnel)
+-------------------------------------------------------------------------------
+El servidor de Bejerman NO debe tener puertos abiertos a internet. Un túnel
+saliente (el servidor se conecta hacia afuera) evita abrir nada en el router.
+
+Opción recomendada: Cloudflare Tunnel (gratis)
+[ ] Requiere un dominio propio administrado en Cloudflare (ej. elchilo.com).
+[ ] Instalar cloudflared como servicio y publicar SOLO la ruta del webhook:
+      bot.elchilo.com  ->  http://localhost:3000
+      (idealmente restringir a /api/webhook/whatsapp; el resto del sistema
+      queda solo para la red interna).
+Alternativa: seguir con ngrok
+[ ] Agente oficial de ngrok (no el paquete de npm), instalado como servicio:
+      ngrok config add-authtoken <token>
+      ngrok service install --config <archivo.yml>   (tunnel a localhost:3000
+      con el dominio estático sleep-striking-grower.ngrok-free.dev)
+      ngrok service start
+[ ] Apagar el ngrok de la PC vieja cuando el nuevo esté andando (el dominio
+      estático es uno solo: no puede estar en dos máquinas a la vez).
+
+
+-------------------------------------------------------------------------------
+ 7. META / WHATSAPP (puesta en marcha del bot)
+-------------------------------------------------------------------------------
+[ ] Si cambia la URL del túnel: en Meta for Developers -> WhatsApp ->
+      Configuración -> Webhook, cambiar la URL de devolución de llamada a
+      https://<dominio>/api/webhook/whatsapp y verificar con el mismo
+      WHATSAPP_VERIFY_TOKEN. Campo suscripto: "messages".
+[ ] Token de acceso PERMANENTE (usuario del sistema en Meta Business
+      Settings). El temporal de 24 h deja al bot mudo al día siguiente.
+[ ] Número definitivo de la empresa registrado en la Cloud API (hoy se usa el
+      de prueba) y WHATSAPP_PHONE_NUMBER_ID actualizado.
+      Ojo: un número en la Cloud API no se puede usar a la vez en la app
+      común de WhatsApp.
+[ ] Nombre visible aprobado por Meta y método de pago cargado en la cuenta.
+[ ] WHATSAPP_APP_SECRET correcto (si no, todos los mensajes se rechazan con 401).
+[ ] Definir quién atiende "Hablar con persona" y cómo (hoy llega por mail a
+      MAIL_ATENCION). Para escribirle al cliente pasadas 24 h de su último
+      mensaje, Meta exige plantillas aprobadas.
+
+
+-------------------------------------------------------------------------------
+ 8. PRUEBAS DESPUÉS DEL CORTE
+-------------------------------------------------------------------------------
+[ ] https://<servidor>/login entra y el home muestra la actividad.
+[ ] La sesión se cierra sola a los 30 min sin uso.
+[ ] Estadísticas / Bejerman muestran datos (conexión a SQL Server OK).
+[ ] Correr el ETL a mano una vez y revisar logs\etl.log (incluye variantes).
+[ ] Planilla de producción: cargar una línea de prueba y procesar con
+      --dry-run antes de crear una OP real.
+[ ] npx tsx scripts\probar-mail.ts  -> llega el mail.
+[ ] Simulación del bot (no manda nada a Meta):
+      node node_modules\tsx\dist\cli.mjs --tsconfig tsconfig.json scripts\simular-chat.ts "hola" "#HACER_PEDIDO" "#RETIRO" "Prueba" "milanesa"
+[ ] Desde un celular: "hola", buscar un producto con variantes (hoja de
+      sierra), reparto con ubicación, "Hablar con persona".
+[ ] pm2 status: costos-web y costos-web-https online, 0 reinicios en loop.
+[ ] Reiniciar el servidor una vez y confirmar que PM2, Caddy y el túnel
+      levantan solos SIN iniciar sesión.
+[ ] A la mañana siguiente: revisar logs\baja-np-AAAA-MM-DD.log (BP corrió
+      una sola vez, desde el servidor).
+
+
+-------------------------------------------------------------------------------
+ 9. VUELTA ATRÁS (si algo falla)
+-------------------------------------------------------------------------------
+- Dejar la PC vieja intacta (app detenida, tareas deshabilitadas) al menos
+  una semana.
+- Para volver: detener PM2 y el túnel en el servidor, re-habilitar las tareas
+  y el ngrok en la PC vieja, y (si cambió) volver la URL del webhook en Meta.
+- Si se cargaron datos en el servidor (fórmulas, planillas, usuarios),
+  hacer un dump de MySQL del servidor y restaurarlo en la PC vieja.
+
+
+-------------------------------------------------------------------------------
+ 10. ANTES DE ABRIR EL BOT A CLIENTES (pendientes funcionales)
+-------------------------------------------------------------------------------
+[ ] Que "Confirmar" cree la nota de pedido real en Bejerman (pendiente 1;
+      primero mapear contra una NP cargada a mano).
+[ ] Cuchillos / chairas / vainas -> atención personal.
+[ ] Revisar los nombres de rubros (RUBROS en lib\whatsapp\bejerman-lookup.ts)
+      y la zona de reparto (ZONA_REPARTO en lib\whatsapp\conversation-handler.ts).
+[ ] Responsable y horario de atención para los avisos de "Hablar con persona".
