@@ -55,6 +55,7 @@ export type ConversationState =
   | "VIENDO_CATALOGO"
   | "ARMANDO_PEDIDO"
   | "ESPERANDO_VARIANTE" // artículo con variantes (medida, talle, color): falta elegir cuál
+  | "ESPERANDO_DETALLE_CONSULTA" // rubro de atención personal: el cliente describe qué necesita
   | "ESPERANDO_CANTIDAD"
   | "ESPERANDO_TIPO_ENTREGA"
   | "ESPERANDO_REPETIR_ENVIO"
@@ -84,4 +85,12 @@ export interface CarritoItem {
   descVariante: string;
   /** Unidad de venta ('UN', 'KG', 'MT', 'CJ', 'LT'). Opcional: sesiones viejas no la traen → 'UN'. */
   unidad?: string;
+  /**
+   * Producto "a consultar" (rubros que asesora el equipo: cuchillos,
+   * repuestos, bandejas, chairas, vainas): el cliente describe lo que
+   * necesita y el equipo lo resuelve. Sin precio ni variante.
+   */
+  consulta?: boolean;
+  /** Identifica la línea de consulta (puede haber varias del mismo rubro). */
+  idConsulta?: string;
 }

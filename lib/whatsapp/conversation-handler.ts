@@ -109,7 +109,7 @@ const LARGO_TITULO_FILA = 24;
 const LARGO_DESCRIPCION_FILA = 72;
 const LARGO_CUERPO_INTERACTIVO = 1024;
 
-const AYUDA_MENU = "Escribí *menu* en cualquier momento para volver a las opciones.";
+const AYUDA_MENU = "Si no encontrás lo que buscás, escribí *salir* en cualquier momento para volver a las opciones.";
 
 const formatoPrecio = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" });
 const formatoCantidad = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 3 });
@@ -242,7 +242,12 @@ function normalizarItem(it: CarritoItem): CarritoItem {
  * Clave de un ítem del carrito: "<codigo>~E1~E2~E3". El mismo artículo en
  * otra variante (ej. otra medida de hoja) es otra línea del pedido.
  */
-function claveItem(it: Pick<CarritoItem, "codigoArticulo" | "codEle1" | "codEle2" | "codEle3">): string {
+function claveItem(
+  it: Pick<CarritoItem, "codigoArticulo" | "codEle1" | "codEle2" | "codEle3"> &
+    Partial<Pick<CarritoItem, "consulta" | "idConsulta">>
+): string {
+  // Cada consulta es su propia línea, aunque sea del mismo rubro o artículo.
+  if (it.consulta) return `CONSULTA~${it.idConsulta ?? ""}~~`;
   return `${it.codigoArticulo}~${claveVariante(it.codEle1, it.codEle2, it.codEle3)}`;
 }
 
@@ -262,6 +267,7 @@ function descripcionItem(it: Pick<CarritoItem, "descripcion" | "descVariante">):
 function lineasCarrito(carrito: CarritoItem[]): string {
   return carrito
     .map((it) => {
+      if (it.consulta) return `• A consultar: ${it.descripcion}`;
       const subtotal = it.precioUnitario ? formatoPrecio.format(it.cantidad * it.precioUnitario) : "precio a confirmar";
       return `• ${cantidadCorta(it.cantidad, unidadDe(it.unidad))} x ${descripcionItem(it)} — ${subtotal}`;
     })
@@ -270,8 +276,13 @@ function lineasCarrito(carrito: CarritoItem[]): string {
 
 function textoTotal(carrito: CarritoItem[]): string {
   const total = carrito.reduce((acc, it) => acc + it.cantidad * it.precioUnitario, 0);
-  const haySinPrecio = carrito.some((it) => !it.precioUnitario);
-  return formatoPrecio.format(total) + (haySinPrecio ? " + artículos con precio a confirmar" : "");
+  const haySinPrecio = carrito.some((it) => !it.consulta && !it.precioUnitario);
+  const hayConsultas = carrito.some((it) => it.consulta);
+  return (
+    formatoPrecio.format(total) +
+    (haySinPrecio ? " + artículos con precio a confirmar" : "") +
+    (hayConsultas ? " + productos a consultar" : "")
+  );
 }
 
 /**
@@ -320,6 +331,12 @@ const PARTE_CORTESIA = new RegExp(
 );
 const SOLO_SEPARADORES = new RegExp(String.raw`^${SEP}*$`, "u");
 const ES_MENU = new RegExp(String.raw`^${SEP}*men[uú]${SEP}*$`, "iu");
+// Cortar lo que se esté haciendo sin cerrar el chat (no encontró lo que
+// buscaba, se equivocó de opción): vuelve al menú y conserva el pedido.
+const ES_SALIR = new RegExp(
+  String.raw`^${SEP}*(salir|regresar|volver|atr[aá]s|cancelar|inicio|terminar)${SEP}*$`,
+  "iu"
+);
 
 /**
  * Separa un saludo del principio del mensaje.
@@ -356,6 +373,10 @@ async function manejarTextoLibre(telefono: string, texto: string, sesion: Sesion
     await irAlMenu(telefono, sesion);
     return;
   }
+  if (ES_SALIR.test(texto)) {
+    await irAlMenu(telefono, sesion, "Listo, dejamos eso.");
+    return;
+  }
 
   // Pidió hablar con una persona: lo que escriba es para el equipo, el bot no
   // contesta. Se reenvía el mensaje original, con saludo incluido.
@@ -374,6 +395,12 @@ async function manejarTextoLibre(telefono: string, texto: string, sesion: Sesion
 
   // De acá en adelante trabajamos sin el saludo inicial.
   texto = resto;
+
+  // --- Describiendo un producto de atención personal (cuchillos, repuestos…) ---
+  if (sesion.estadoActual === "ESPERANDO_DETALLE_CONSULTA") {
+    await agregarConsulta(telefono, sesion, texto);
+    return;
+  }
 
   // --- Acaba de ver un artículo (o eligió cambiar una cantidad) ---
   if (sesion.estadoActual === "ESPERANDO_CANTIDAD") {
@@ -425,13 +452,13 @@ async function manejarTextoLibre(telefono: string, texto: string, sesion: Sesion
  * Vuelve al menú sin perder un pedido en curso: antes, "hola" o "menu"
  * vaciaban el carrito sin avisar. Para descartarlo está "Cancelar pedido".
  */
-async function irAlMenu(telefono: string, sesion: Sesion) {
+async function irAlMenu(telefono: string, sesion: Sesion, aviso?: string) {
   const hayPedido = sesion.carritoActual.length > 0;
   await actualizarSesion(telefono, {
     estadoActual: "MENU_PRINCIPAL",
     contexto: hayPedido ? contextoBase(sesion) : {},
   });
-  await mostrarMenuPrincipal(telefono, sesion.carritoActual);
+  await mostrarMenuPrincipal(telefono, sesion.carritoActual, aviso);
 }
 
 /**
@@ -467,10 +494,30 @@ async function realizarBusquedaArticulo(
     [textoBuscado(texto), ...filtros.map(tituloFiltro)].join(" ") + (rubro ? ` en ${nombreRubro(rubro)}` : "");
 
   if (totalCoincidencias === 0) {
+    // "repuesto picadora": las descripciones no dicen "repuesto", pero el
+    // cliente nombró un rubro que asesora el equipo → se toma la consulta.
+    const rubroNombrado = filtros.length === 0 ? rubroPersonalNombrado(texto) : null;
+    if (rubroNombrado) {
+      await iniciarConsultaPersonal(telefono, sesion, rubroNombrado);
+      return;
+    }
     await sendTextMessage(
       telefono,
       `No encontré productos para "${buscado}". Probá con menos palabras (ej: solo "pimienta"). ${AYUDA_MENU}`
     );
+    return;
+  }
+
+  // Rubros que asesora el equipo: no se hace elegir modelo, se toma la
+  // consulta. Aplica si eligió ese rubro, o si casi todo lo encontrado es de
+  // ahí ("cuchillo": 191 de 217 en Cuchillería; "chaira": 45 de 51).
+  const conteoRubros = new Map<string, number>();
+  for (const a of articulos) conteoRubros.set(rubroDe(a.codigo), (conteoRubros.get(rubroDe(a.codigo)) ?? 0) + 1);
+  const [rubroPrincipal, cantidadPrincipal] = [...conteoRubros.entries()].sort((a, b) => b[1] - a[1])[0];
+  const rubroPersonal = rubro ?? rubroPrincipal;
+  const dominaPersonal = filtros.length === 0 && cantidadPrincipal / articulos.length >= PROPORCION_RUBRO_PERSONAL;
+  if (esRubroPersonal(rubroPersonal) && (rubro !== undefined || dominaPersonal)) {
+    await iniciarConsultaPersonal(telefono, sesion, rubroPersonal);
     return;
   }
 
@@ -504,7 +551,9 @@ async function realizarBusquedaArticulo(
               rows: visibles.map((r) => ({
                 id: `RUBRO|${r.rubro}|${textoId}`,
                 title: truncar(nombreRubro(r.rubro), LARGO_TITULO_FILA),
-                description: `${r.cantidad} producto${r.cantidad === 1 ? "" : "s"}`,
+                description:
+                  `${r.cantidad} producto${r.cantidad === 1 ? "" : "s"}` +
+                  (esRubroPersonal(r.rubro) ? " · te asesoramos" : ""),
               })),
             },
           ]
@@ -812,6 +861,12 @@ async function mostrarDetalleArticulo(
   tieneVariantes?: boolean,
   textoBusqueda?: string
 ) {
+  // Cuchillos, repuestos, bandejas, chairas, vainas: los asesora el equipo.
+  if (esRubroPersonal(rubroDe(codigo))) {
+    await iniciarConsultaPersonal(telefono, sesion, rubroDe(codigo), { codigo, descripcion });
+    return;
+  }
+
   try {
     const variantes = tieneVariantes === false ? [] : await obtenerVariantes(codigo);
     if (variantes.length > 0) {
@@ -1774,6 +1829,10 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
       await mostrarCarrito(telefono, sesion);
       return;
     }
+    if (item.consulta) {
+      await mostrarOpcionesItem(telefono, sesion, clave); // sin cantidad: solo quitar
+      return;
+    }
     await actualizarSesion(telefono, {
       estadoActual: "ESPERANDO_CANTIDAD",
       contexto: {
@@ -1838,6 +1897,100 @@ async function avisarAtencion(sesion: Sesion, cuerpo: string, asunto?: string) {
   } catch (err) {
     console.error(`[whatsapp] No se pudo mandar el mail de atención de ${sesion.telefono}:`, err);
   }
+}
+
+// ---- Rubros de atención personal ----
+//
+// Cuchillos, repuestos, bandejas, chairas y vainas tienen demasiados modelos,
+// medidas y compatibilidades como para elegirlos solos en una lista: el
+// cliente describe lo que necesita, queda en el pedido como "A consultar" y
+// el equipo lo resuelve (se avisa por mail al confirmar). El resto del pedido
+// se arma normalmente.
+
+const RUBROS_ATENCION_PERSONAL = new Set(["CUC", "REP", "BAN", "CHA", "VAI"]);
+
+// Si al menos esta parte de lo encontrado es de un rubro de atención
+// personal, se va directo a la consulta en vez de ofrecer la lista de rubros.
+const PROPORCION_RUBRO_PERSONAL = 0.8;
+
+function esRubroPersonal(rubro: string): boolean {
+  return RUBROS_ATENCION_PERSONAL.has(rubro);
+}
+
+// Cómo los nombra el cliente (en singular, sin acentos). "cuchillo" no está
+// en el nombre del rubro ("Cuchillería"), por eso la lista es explícita.
+const NOMBRES_RUBRO_PERSONAL: Record<string, string[]> = {
+  CUC: ["cuchillo", "cuchilleria"],
+  REP: ["repuesto"],
+  BAN: ["bandeja"],
+  CHA: ["chaira"],
+  VAI: ["vaina"],
+};
+
+/** Rubro de atención personal que nombra la búsqueda ("repuesto picadora" → REP), o null. */
+function rubroPersonalNombrado(texto: string): string | null {
+  const formas = normalizarBusqueda(texto).flat();
+  const [rubro] =
+    Object.entries(NOMBRES_RUBRO_PERSONAL).find(([, nombres]) =>
+      nombres.some((n) => formas.some((f) => f === n || (f.length >= 4 && n.startsWith(f))))
+    ) ?? [];
+  return rubro ?? null;
+}
+
+/** Pide que describa lo que necesita de un rubro de atención personal. */
+async function iniciarConsultaPersonal(
+  telefono: string,
+  sesion: Sesion,
+  rubro: string,
+  referencia?: { codigo: string; descripcion: string }
+) {
+  await actualizarSesion(telefono, {
+    estadoActual: "ESPERANDO_DETALLE_CONSULTA",
+    contexto: { ...contextoBase(sesion), rubroConsulta: rubro, ...(referencia && { referenciaConsulta: referencia }) },
+  });
+  await sendTextMessage(
+    telefono,
+    `Los productos de *${nombreRubro(rubro)}* te los asesora personalmente nuestro equipo, porque hay muchos modelos y medidas.\n\n` +
+      (referencia ? `Elegiste: ${referencia.descripcion}\n\n` : "") +
+      "Contanos qué necesitás (tipo, medida, marca y cantidad) y lo sumamos a tu pedido como consulta. " +
+      "Alguien del equipo te va a escribir para cerrar ese detalle, y el resto del pedido lo podés seguir armando acá.\n\n" +
+      "Si no querés agregarlo, escribí *salir*."
+  );
+}
+
+/** Lo que escribió el cliente sobre un producto de atención personal → línea "A consultar". */
+async function agregarConsulta(telefono: string, sesion: Sesion, texto: string) {
+  const rubro = (sesion.contexto.rubroConsulta as string | undefined) ?? "";
+  const referencia = sesion.contexto.referenciaConsulta as { codigo: string; descripcion: string } | undefined;
+  const detalle = texto.trim();
+
+  const item: CarritoItem = {
+    codigoArticulo: referencia?.codigo ?? "",
+    descripcion: referencia
+      ? `${referencia.descripcion} — ${detalle}`
+      : `${rubro ? `${nombreRubro(rubro)}: ` : ""}${detalle}`,
+    cantidad: 1,
+    precioUnitario: 0,
+    codEle1: "",
+    codEle2: "",
+    codEle3: "",
+    descVariante: "",
+    consulta: true,
+    idConsulta: String(Date.now()),
+  };
+  const carrito = [...sesion.carritoActual, item];
+
+  await actualizarSesion(telefono, { estadoActual: "ARMANDO_PEDIDO", carritoActual: carrito, contexto: contextoBase(sesion) });
+  await sendButtons(
+    telefono,
+    `Anotado como consulta: ${item.descripcion}\n\n` +
+      "Alguien del equipo te va a escribir para resolverlo. ¿Seguimos con el pedido?",
+    [
+      { id: "AGREGAR_OTRO", title: "Agregar otro" },
+      { id: "VER_CARRITO", title: "Ver mi pedido" },
+      { id: "FINALIZAR_PEDIDO", title: "Finalizar pedido" },
+    ]
+  );
 }
 
 /** Temas de "Hablar con persona": el título va en el asunto del mail. */
@@ -1998,14 +2151,14 @@ async function pedirDireccion(telefono: string, datosEntrega: DatosEntrega) {
   try {
     await sendLocationRequest(
       telefono,
-      "¿Cuál es la dirección de entrega? Tocá *Enviar ubicación* para marcarla en el mapa, o escribila (calle, número y localidad)."
+      "¿Cuál es la dirección de entrega? Tocá *Enviar ubicación* para marcarla en el mapa, o escribí la calle y el número."
     );
   } catch (err) {
     // Si Meta rechaza el botón de ubicación, se pide igual por texto.
     console.error("[whatsapp] No se pudo pedir la ubicación con botón:", err);
     await sendTextMessage(
       telefono,
-      "¿Cuál es la dirección de entrega? Escribila (calle, número y localidad) o mandá tu ubicación desde 📎 → Ubicación."
+      "¿Cuál es la dirección de entrega? Escribí la calle y el número, o mandá tu ubicación desde 📎 → Ubicación."
     );
   }
 }
@@ -2152,7 +2305,9 @@ async function mostrarCarrito(telefono: string, sesion: Sesion) {
         title: truncar(it.descripcion, LARGO_TITULO_FILA),
         // La variante va abajo: en el título (24 caracteres) se perdería.
         description: truncar(
-          (it.descVariante ? `${it.descVariante} · ` : "") + `Cantidad: ${formatearCantidad(it.cantidad)}`,
+          it.consulta
+            ? "A consultar con el equipo"
+            : (it.descVariante ? `${it.descVariante} · ` : "") + `Cantidad: ${formatearCantidad(it.cantidad)}`,
           LARGO_DESCRIPCION_FILA
         ),
       })),
@@ -2171,6 +2326,15 @@ async function mostrarOpcionesItem(telefono: string, sesion: Sesion, clave: stri
   const item = sesion.carritoActual.find((it) => claveItem(it) === clave);
   if (!item) {
     await mostrarCarrito(telefono, sesion); // mensaje viejo de un artículo que ya no está
+    return;
+  }
+
+  // Una consulta no tiene cantidad ni precio: solo se puede quitar.
+  if (item.consulta) {
+    await sendButtons(telefono, `*A consultar:* ${item.descripcion}\n\n¿Qué querés hacer?`, [
+      { id: `QUITAR|${clave}`, title: "Quitar del pedido" },
+      { id: "VER_CARRITO", title: "Volver al pedido" },
+    ]);
     return;
   }
 
@@ -2223,9 +2387,11 @@ async function mostrarResumenPedido(telefono: string, sesion: Sesion) {
 }
 
 /**
- * Mensaje final tras confirmar, adaptado al tipo de entrega.
+ * Mensaje final tras confirmar, adaptado al tipo de entrega, y aviso por
+ * mail al equipo con el pedido completo (y lo que queda a consultar).
  * TODO: todavía no crea la nota de pedido real en Bejerman (SegCabV/SegDetV)
- * — eso es el próximo paso grande pendiente.
+ * — eso es el próximo paso grande pendiente. Mientras tanto el mail es la
+ * única forma de que el equipo se entere del pedido.
  */
 async function confirmarPedido(telefono: string, sesion: Sesion) {
   // Un "Confirmar" de un mensaje viejo (pedido ya confirmado, cancelado o
@@ -2237,6 +2403,18 @@ async function confirmarPedido(telefono: string, sesion: Sesion) {
   }
 
   const datosEntrega = obtenerDatosEntrega(sesion);
+  const consultas = sesion.carritoActual.filter((it) => it.consulta);
+
+  await avisarAtencion(
+    sesion,
+    `Confirmó un pedido por WhatsApp.\n\nPedido:\n${lineasCarrito(sesion.carritoActual)}\n` +
+      `Total: ${textoTotal(sesion.carritoActual)}` +
+      (datosEntrega ? `\n\nEntrega:\n${textoEntrega(datosEntrega)}` : "") +
+      (consultas.length > 0
+        ? `\n\n⚠️ Hay ${consultas.length} producto(s) a consultar: escribirle al cliente para resolverlos.`
+        : ""),
+    consultas.length > 0 ? "Pedido con productos a consultar" : "Pedido confirmado"
+  );
 
   if (datosEntrega?.tipo === "RETIRO") {
     await sendTextMessage(
@@ -2257,14 +2435,24 @@ async function confirmarPedido(telefono: string, sesion: Sesion) {
     );
   }
 
+  if (consultas.length > 0) {
+    await sendTextMessage(
+      telefono,
+      `Sobre ${consultas.length === 1 ? "el producto a consultar" : `los ${consultas.length} productos a consultar`}, ` +
+        "alguien del equipo te va a escribir por WhatsApp (puede ser desde otro número) para resolverlo."
+    );
+  }
+
   await reiniciarSesion(telefono);
 }
 
-async function mostrarMenuPrincipal(telefono: string, carrito: CarritoItem[]) {
-  const ayuda = `También podés escribir directamente el producto que buscás (ej: "harina 000"). ${AYUDA_MENU}`;
+async function mostrarMenuPrincipal(telefono: string, carrito: CarritoItem[], aviso?: string) {
+  const ayuda =
+    `También podés escribir directamente el producto que buscás (ej: "harina 000"). ` +
+    `Escribí *salir* en cualquier momento para volver a estas opciones.`;
 
   if (carrito.length > 0) {
-    await sendButtons(telefono, `¡Hola! Tenés un pedido en curso con ${carrito.length} producto(s).\n\n${ayuda}`, [
+    await sendButtons(telefono, `${aviso ?? "¡Hola!"} Tenés un pedido en curso con ${carrito.length} producto(s).\n\n${ayuda}`, [
       { id: "VER_CARRITO", title: "Ver mi pedido" },
       { id: "HABLAR_PERSONA", title: "Hablar con persona" },
       { id: "CANCELAR_PEDIDO", title: "Cancelar pedido" },
@@ -2272,7 +2460,8 @@ async function mostrarMenuPrincipal(telefono: string, carrito: CarritoItem[]) {
     return;
   }
 
-  await sendButtons(telefono, `¡Hola! Soy el asistente de pedidos de El Chilo. ¿En qué te puedo ayudar?\n\n${ayuda}`, [
+  const saludo = aviso ? `${aviso} ¿En qué más te puedo ayudar?` : "¡Hola! Soy el asistente de pedidos de El Chilo. ¿En qué te puedo ayudar?";
+  await sendButtons(telefono, `${saludo}\n\n${ayuda}`, [
     { id: "HACER_PEDIDO", title: "Hacer pedido" },
     { id: "HABLAR_PERSONA", title: "Hablar con persona" },
   ]);
