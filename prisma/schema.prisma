@@ -156,6 +156,7 @@ model BejArticulo {
   comprasDetalle BejCompraDet[]
   listaPrecios   BejListaPrecio[]
   npDetalle      BejNPDet[]
+  sinonimos      ArticuloSinonimo[]
   variantes      BejArticuloVariante[]
 
   @@map("bej_articulos")
@@ -586,6 +587,40 @@ model PedidoWhatsApp {
   @@index([telefono])
   @@index([estado])
   @@map("whatsapp_pedidos")
+}
+
+// Cómo llaman los clientes a un artículo cuando no coincide con la descripción
+// de Bejerman ("chinesca" → TRI0000004). Los carga el equipo desde la pantalla
+// "Sinónimos del chat"; la búsqueda del chat los mira junto con la descripción.
+model ArticuloSinonimo {
+  id           Int         @id @default(autoincrement())
+  sinonimo     String      @db.VarChar(80) // tal cual se cargó, para mostrar
+  sinonimoNorm String      @db.VarChar(80) // minúsculas, sin acentos: lo que se compara
+  artCodigo    String      @db.VarChar(20)
+  articulo     BejArticulo @relation(fields: [artCodigo], references: [codigo], onDelete: Cascade)
+  creadoPor    String      @db.VarChar(60)
+  creadoEn     DateTime    @default(now())
+
+  @@unique([sinonimoNorm, artCodigo])
+  @@index([sinonimoNorm])
+  @@map("bej_articulo_sinonimos")
+}
+
+// Cada búsqueda de producto escrita en el chat y cuántos resultados dio. Las
+// que dieron 0 se muestran en "Sinónimos del chat" para convertirlas en
+// sinónimo (o descartarlas).
+model BusquedaWhatsApp {
+  id         Int      @id @default(autoincrement())
+  telefono   String   @db.VarChar(20)
+  texto      String   @db.VarChar(200)
+  textoNorm  String   @db.VarChar(200)
+  resultados Int
+  descartada Boolean  @default(false)
+  creadoEn   DateTime @default(now())
+
+  @@index([textoNorm])
+  @@index([creadoEn])
+  @@map("whatsapp_busquedas")
 }
 
 // Vínculo WhatsApp → cliente de Bejerman, guardado cuando la identificación

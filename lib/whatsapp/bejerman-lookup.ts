@@ -235,9 +235,24 @@ function whereBusqueda(textoUsuario: string, rubro?: string) {
             },
           },
         },
+        // Cómo lo llaman los clientes ("chinesca" → tripa de cerdo), cargado
+        // desde la pantalla "Sinónimos del chat".
+        { sinonimos: { some: { sinonimoNorm: { contains: forma } } } },
       ]),
     })),
   };
+}
+
+/**
+ * Texto normalizado para guardar y comparar sinónimos y búsquedas:
+ * minúsculas, sin acentos, sin puntuación y con espacios simples.
+ * "Batter Económico" → "batter economico".
+ */
+export function normalizarTexto(texto: string): string {
+  return sinAcentos(texto.toLowerCase())
+    .replace(/[^\p{L}\p{N}.\/-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**

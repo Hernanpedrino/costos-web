@@ -10,6 +10,7 @@ import {
   cumpleFiltro,
   tituloFiltro,
   normalizarBusqueda,
+  normalizarTexto,
   contarPorRubro,
   nombreRubro,
   rubroDe,
@@ -533,10 +534,18 @@ async function realizarBusquedaArticulo(
   const buscado =
     [textoBuscado(texto), ...filtros.map(tituloFiltro)].join(" ") + (rubro ? ` en ${nombreRubro(rubro)}` : "");
 
+  // "repuesto picadora": las descripciones no dicen "repuesto", pero el
+  // cliente nombró un rubro que asesora el equipo → se toma la consulta.
+  const rubroNombrado =
+    totalCoincidencias === 0 && filtros.length === 0 ? rubroPersonalNombrado(texto) : null;
+
+  // Solo la búsqueda que escribió (no al elegir rubro o filtro): las que no
+  // encuentran nada se muestran en "Sinónimos del chat".
+  if (!rubro && filtros.length === 0) {
+    registrarBusqueda(telefono, texto, rubroNombrado ? -1 : totalCoincidencias);
+  }
+
   if (totalCoincidencias === 0) {
-    // "repuesto picadora": las descripciones no dicen "repuesto", pero el
-    // cliente nombró un rubro que asesora el equipo → se toma la consulta.
-    const rubroNombrado = filtros.length === 0 ? rubroPersonalNombrado(texto) : null;
     if (rubroNombrado) {
       await iniciarConsultaPersonal(telefono, sesion, rubroNombrado);
       return;
@@ -666,6 +675,23 @@ async function realizarBusquedaArticulo(
       }),
     },
   ]);
+}
+
+/**
+ * Guarda la búsqueda y cuántos resultados dio (-1 = derivada a consulta
+ * personal). No frena la respuesta al cliente y nunca lanza.
+ */
+function registrarBusqueda(telefono: string, texto: string, resultados: number) {
+  prisma.busquedaWhatsApp
+    .create({
+      data: {
+        telefono,
+        texto: texto.slice(0, 200),
+        textoNorm: normalizarTexto(texto).slice(0, 200),
+        resultados,
+      },
+    })
+    .catch((err) => console.error("[whatsapp] No se pudo registrar la búsqueda:", err));
 }
 
 /** Texto de búsqueda para mostrar: sin conectores ni palabras de intención, en singular. */

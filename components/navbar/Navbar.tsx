@@ -40,6 +40,7 @@ const GRUPOS: Grupo[] = [
     items: [
       { href: "/planificacion", label: "Planificación" },
       { href: "/produccion", label: "Producción" },
+      { href: "/sinonimos", label: "Sinónimos del chat" },
     ],
   },
 ];
