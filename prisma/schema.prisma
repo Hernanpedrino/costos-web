@@ -562,3 +562,41 @@ model MensajeWhatsApp {
   @@index([telefono])
   @@map("whatsapp_mensajes")
 }
+
+// Pedido confirmado por el chat. Guarda todo lo necesario para crear la NPW
+// en Bejerman (o para dar de alta al cliente si no se lo pudo identificar),
+// y el resultado: una NPW por pedido, nunca dos.
+//   estado: "pendiente_alta" (cliente no identificado: el equipo lo registra)
+//           "identificado"   (listo para generar la NPW)
+//           "npw_creada" | "error"
+model PedidoWhatsApp {
+  id            Int      @id @default(autoincrement())
+  telefono      String   @db.VarChar(20)
+  estado        String   @db.VarChar(20)
+  cliCod        String?  @db.VarChar(6) // Clientes.cli_Cod de Bejerman
+  cliRazSoc     String?  @db.VarChar(40)
+  clienteDatos  Json // lo que escribió el cliente: nombre, dirección, localidad, CUIT
+  carrito       Json // CarritoItem[]
+  entrega       Json // DatosEntrega
+  npwNumero     String?  @db.VarChar(20)
+  error         String?  @db.Text
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  @@index([telefono])
+  @@index([estado])
+  @@map("whatsapp_pedidos")
+}
+
+// Vínculo WhatsApp → cliente de Bejerman, guardado cuando la identificación
+// fue segura. Un número puede comprar para más de un comercio.
+model ClienteWhatsApp {
+  telefono   String   @db.VarChar(20)
+  cliCod     String   @db.VarChar(6)
+  cliRazSoc  String   @db.VarChar(40)
+  ultimoUso  DateTime @default(now())
+  creadoEn   DateTime @default(now())
+
+  @@id([telefono, cliCod])
+  @@map("whatsapp_clientes")
+}

@@ -21,6 +21,9 @@ import { obtenerSesion, actualizarSesion, reiniciarSesion, type Sesion } from ".
 import { calcularFechaEntrega, INFO_RETIRO } from "./delivery-schedule";
 import { buscarUltimoEnvio } from "./order-history";
 import { enviarMail } from "@/lib/mail";
+import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
+import { identificarCliente, obtenerCliente, type DatosClienteEscritos } from "./bejerman-clientes";
 import type { WhatsAppMessage, CarritoItem } from "./types";
 
 type DatosEntrega =
@@ -189,7 +192,23 @@ function obtenerDatosEntrega(sesion: Sesion): DatosEntrega | undefined {
  * principio y tiene que durar mientras se arma el resto del pedido.
  */
 function contextoBase(sesion: Sesion): Record<string, unknown> {
-  return { datosEntrega: obtenerDatosEntrega(sesion) };
+  // El cliente de Bejerman, una vez resuelto, también sobrevive: si modifica
+  // el pedido después, no se lo vuelve a identificar.
+  return { datosEntrega: obtenerDatosEntrega(sesion), cliente: sesion.contexto.cliente };
+}
+
+/**
+ * Cliente del pedido, resuelto antes del resumen:
+ *   - identificado: cliente de Bejerman (por vínculo guardado o por verificación)
+ *   - pendiente_alta: no se lo pudo identificar con seguridad → no se genera
+ *     NPW; el equipo lo registra o verifica con los datos que escribió.
+ */
+type ClienteChat =
+  | { estado: "identificado"; codigo: string; razonSocial: string; listaPrecios: string; via: string }
+  | { estado: "pendiente_alta"; datos: DatosClienteEscritos; motivo: "sin_coincidencia" | "ambiguo" | "rechazo" | "error" };
+
+function obtenerClienteChat(sesion: Sesion): ClienteChat | undefined {
+  return sesion.contexto.cliente as ClienteChat | undefined;
 }
 
 /** True si ya están todos los datos que necesita el tipo de entrega elegido. */
@@ -399,6 +418,27 @@ async function manejarTextoLibre(telefono: string, texto: string, sesion: Sesion
   // --- Describiendo un producto de atención personal (cuchillos, repuestos…) ---
   if (sesion.estadoActual === "ESPERANDO_DETALLE_CONSULTA") {
     await agregarConsulta(telefono, sesion, texto);
+    return;
+  }
+
+  // --- Identificación del cliente antes del resumen ---
+  if (sesion.estadoActual === "ESPERANDO_CLIENTE_NOMBRE") {
+    await procesarNombreCliente(telefono, texto, sesion);
+    return;
+  }
+  if (sesion.estadoActual === "ESPERANDO_CLIENTE_DIRECCION") {
+    await procesarDireccionCliente(telefono, texto, sesion);
+    return;
+  }
+  if (sesion.estadoActual === "ESPERANDO_CONFIRMAR_CLIENTE") {
+    const candidato = sesion.contexto.candidatoCodigo as string | undefined;
+    if (/^s[ií]\b/i.test(texto) && candidato) {
+      await aceptarCliente(telefono, sesion, candidato);
+    } else if (/^no\b/i.test(texto)) {
+      await rechazarCliente(telefono, sesion);
+    } else {
+      await sendTextMessage(telefono, 'Respondé *sí* o *no* (o tocá una de las opciones). Escribí *salir* para volver al menú.');
+    }
     return;
   }
 
@@ -1652,6 +1692,16 @@ async function manejarSeleccion(telefono: string, idOpcion: string, sesion: Sesi
     return;
   }
 
+  // Identificación del cliente: "CLI_SI|<cli_Cod>" / "CLI_NO"
+  if (idOpcion.startsWith("CLI_SI|")) {
+    await aceptarCliente(telefono, sesion, idOpcion.replace("CLI_SI|", ""));
+    return;
+  }
+  if (idOpcion === "CLI_NO") {
+    await rechazarCliente(telefono, sesion);
+    return;
+  }
+
   if (idOpcion === "CONFIRMAR_PEDIDO") {
     await confirmarPedido(telefono, sesion);
     return;
@@ -1896,6 +1946,279 @@ async function avisarAtencion(sesion: Sesion, cuerpo: string, asunto?: string) {
     });
   } catch (err) {
     console.error(`[whatsapp] No se pudo mandar el mail de atención de ${sesion.telefono}:`, err);
+  }
+}
+
+// ---- Identificación del cliente de Bejerman ----
+//
+// Antes del resumen: la NPW necesita un cliente de Bejerman. Primero se usa
+// el vínculo guardado de pedidos anteriores (WhatsApp → cliente); si no hay,
+// se pide razón social / nombre y dirección del comercio y se verifica con
+// bejerman-clientes#identificarCliente (dos señales fuertes, un único
+// cliente). Si no se lo encuentra con seguridad, el pedido se toma igual pero
+// sin NPW: el equipo registra o verifica al cliente. Nunca se muestra una
+// lista de clientes; la razón social solo aparece si coincidió con lo que el
+// propio cliente escribió (o con un vínculo de este mismo número).
+
+/** Datos de identificación que se van juntando en el contexto. */
+function datosClienteDe(sesion: Sesion): DatosClienteEscritos {
+  return (sesion.contexto.clienteDatos as DatosClienteEscritos | undefined) ?? {};
+}
+
+async function iniciarIdentificacion(telefono: string, sesion: Sesion) {
+  // 1. Comercios ya vinculados a este número en pedidos anteriores.
+  let vinculos: { cliCod: string; cliRazSoc: string }[] = [];
+  try {
+    vinculos = await prisma.clienteWhatsApp.findMany({
+      where: { telefono },
+      orderBy: { ultimoUso: "desc" },
+      take: 8,
+    });
+  } catch (err) {
+    console.error("[whatsapp] No se pudieron leer los vínculos de cliente:", err);
+  }
+
+  if (vinculos.length === 1) {
+    await proponerCliente(telefono, sesion, vinculos[0].cliCod, vinculos[0].cliRazSoc, "vinculo", "¿El pedido es para");
+    return;
+  }
+  if (vinculos.length > 1) {
+    await actualizarSesion(telefono, {
+      estadoActual: "ESPERANDO_CONFIRMAR_CLIENTE",
+      contexto: { ...contextoBase(sesion), origenCandidato: "vinculo" },
+    });
+    await sendList(telefono, "¿Para qué comercio es el pedido?", "Elegir comercio", [
+      {
+        title: "Tus comercios",
+        rows: [
+          ...vinculos.map((v) => ({ id: `CLI_SI|${v.cliCod}`, title: truncar(v.cliRazSoc, LARGO_TITULO_FILA) })),
+          { id: "CLI_NO", title: "Otro comercio" },
+        ],
+      },
+    ]);
+    return;
+  }
+
+  // 2. En reparto ya tenemos el nombre del local y la dirección: se prueba con eso.
+  const entrega = obtenerDatosEntrega(sesion);
+  const datos: DatosClienteEscritos = { telefono };
+  if (entrega?.tipo === "REPARTO") {
+    Object.assign(datos, { nombre: entrega.nombreLocal, direccion: entrega.direccion, localidad: entrega.localidad });
+    if (await intentarIdentificacion(telefono, sesion, datos)) return;
+  }
+
+  await pedirNombreCliente(telefono, sesion, datos);
+}
+
+async function pedirNombreCliente(telefono: string, sesion: Sesion, datos: DatosClienteEscritos) {
+  await actualizarSesion(telefono, {
+    estadoActual: "ESPERANDO_CLIENTE_NOMBRE",
+    contexto: { ...contextoBase(sesion), clienteDatos: datos },
+  });
+  await sendTextMessage(
+    telefono,
+    "Para cargar tu pedido necesitamos identificarte como cliente.\n\n" +
+      "¿Cuál es la razón social o el nombre de tu comercio? Si tenés el CUIT a mano, podés escribirlo también.\n\n" +
+      "Si es tu primera compra, escribí igual tu nombre o el del comercio."
+  );
+}
+
+/** Razón social / nombre (y CUIT si lo puso): después se pide la dirección del comercio. */
+async function procesarNombreCliente(telefono: string, texto: string, sesion: Sesion) {
+  // CUIT con o sin guiones: 20-12345678-3 / 20123456783
+  const RE_CUIT = /\b\d{2}[-\s]?\d{8}[-\s]?\d\b/;
+  const cuit = texto.match(RE_CUIT)?.[0].replace(/\D/g, "");
+  const nombre = texto.replace(RE_CUIT, " ").replace(/\bcuit\b:?/i, " ").replace(/\s+/g, " ").trim();
+  const datos: DatosClienteEscritos = { ...datosClienteDe(sesion), telefono, nombre: nombre || undefined, cuit };
+
+  // Reparto: primero con la dirección de entrega (suele ser la del comercio).
+  const entrega = obtenerDatosEntrega(sesion);
+  if (entrega?.tipo === "REPARTO" && entrega.direccion) {
+    const conEntrega = { ...datos, direccion: entrega.direccion, localidad: entrega.localidad };
+    if (await intentarIdentificacion(telefono, sesion, conEntrega)) return;
+  } else if (cuit && (await intentarIdentificacion(telefono, sesion, datos))) {
+    return; // CUIT + nombre ya alcanza
+  }
+
+  await actualizarSesion(telefono, {
+    estadoActual: "ESPERANDO_CLIENTE_DIRECCION",
+    contexto: { ...contextoBase(sesion), clienteDatos: datos },
+  });
+  await sendTextMessage(
+    telefono,
+    entrega?.tipo === "REPARTO"
+      ? "¿Cuál es la dirección del comercio registrada con nosotros? (calle y número; puede ser distinta a la de entrega)"
+      : "¿Cuál es la dirección del comercio? (calle y número)"
+  );
+}
+
+async function procesarDireccionCliente(telefono: string, texto: string, sesion: Sesion) {
+  const datos: DatosClienteEscritos = { ...datosClienteDe(sesion), telefono, direccion: texto.trim() };
+  const localidad = localidadEnTexto(texto);
+  if (localidad) datos.localidad = localidad;
+  if (await intentarIdentificacion(telefono, sesion, datos)) return;
+  await marcarPendienteAlta(telefono, sesion, datos, "sin_coincidencia");
+}
+
+/**
+ * Verifica contra Bejerman. Si identifica a un único cliente, le propone
+ * confirmar y devuelve true. Si es ambiguo, lo deja pendiente de verificación
+ * (true: ya se respondió). Si no hay coincidencia, devuelve false para que el
+ * llamador pida más datos.
+ */
+async function intentarIdentificacion(telefono: string, sesion: Sesion, datos: DatosClienteEscritos): Promise<boolean> {
+  try {
+    const r = await identificarCliente(datos);
+    if (r.estado === "identificado") {
+      await proponerCliente(
+        telefono,
+        { ...sesion, contexto: { ...sesion.contexto, clienteDatos: datos } },
+        r.cliente.codigo,
+        r.cliente.razonSocial,
+        `verificado por ${r.senales.join(" + ")}`,
+        "Te encontramos como"
+      );
+      return true;
+    }
+    if (r.estado === "ambiguo") {
+      await marcarPendienteAlta(telefono, sesion, datos, "ambiguo");
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error("[whatsapp] Error identificando cliente en Bejerman:", err);
+    await marcarPendienteAlta(telefono, sesion, datos, "error");
+    return true;
+  }
+}
+
+/** "¿El pedido es para X?" / "Te encontramos como X. ¿Es correcto?" */
+async function proponerCliente(
+  telefono: string,
+  sesion: Sesion,
+  codigo: string,
+  razonSocial: string,
+  origen: string,
+  pregunta: string
+) {
+  await actualizarSesion(telefono, {
+    estadoActual: "ESPERANDO_CONFIRMAR_CLIENTE",
+    contexto: {
+      ...contextoBase(sesion),
+      clienteDatos: datosClienteDe(sesion),
+      origenCandidato: origen,
+      candidatoCodigo: codigo,
+    },
+  });
+  await sendButtons(
+    telefono,
+    pregunta === "Te encontramos como" ? `Te encontramos como *${razonSocial}*. ¿Es correcto?` : `${pregunta} *${razonSocial}*?`,
+    [
+      { id: `CLI_SI|${codigo}`, title: "Sí" },
+      { id: "CLI_NO", title: pregunta === "Te encontramos como" ? "No" : "No, es otro" },
+    ]
+  );
+}
+
+/** Confirmó el cliente: queda en el pedido y se guarda el vínculo para la próxima. */
+async function aceptarCliente(telefono: string, sesion: Sesion, codigo: string) {
+  let clienteBej = null;
+  try {
+    clienteBej = await obtenerCliente(codigo);
+  } catch (err) {
+    console.error("[whatsapp] Error leyendo el cliente de Bejerman:", err);
+  }
+  if (!clienteBej) {
+    // Inhabilitado o dado de baja desde el vínculo: que lo revise el equipo.
+    await marcarPendienteAlta(telefono, sesion, datosClienteDe(sesion), "error");
+    return;
+  }
+
+  const cliente: ClienteChat = {
+    estado: "identificado",
+    codigo: clienteBej.codigo,
+    razonSocial: clienteBej.razonSocial,
+    listaPrecios: clienteBej.listaPrecios,
+    via: String(sesion.contexto.origenCandidato ?? "vinculo"),
+  };
+  try {
+    await prisma.clienteWhatsApp.upsert({
+      where: { telefono_cliCod: { telefono, cliCod: cliente.codigo } },
+      update: { cliRazSoc: cliente.razonSocial, ultimoUso: new Date() },
+      create: { telefono, cliCod: cliente.codigo, cliRazSoc: cliente.razonSocial },
+    });
+  } catch (err) {
+    console.error("[whatsapp] No se pudo guardar el vínculo de cliente:", err);
+  }
+
+  const contexto = { ...contextoBase(sesion), cliente };
+  await actualizarSesion(telefono, { estadoActual: "ARMANDO_PEDIDO", contexto });
+  await mostrarResumenPedido(telefono, { ...sesion, contexto });
+}
+
+/**
+ * Dijo que no es ese cliente: si venía de un vínculo guardado, se le piden
+ * los datos; si venía de la verificación, lo resuelve el equipo.
+ */
+async function rechazarCliente(telefono: string, sesion: Sesion) {
+  if (sesion.contexto.origenCandidato === "vinculo") {
+    await pedirNombreCliente(telefono, sesion, { telefono });
+    return;
+  }
+  await marcarPendienteAlta(telefono, sesion, datosClienteDe(sesion), "rechazo");
+}
+
+/** Sin identificación segura: el pedido sigue, pero sin NPW (alta/verificación del equipo). */
+async function marcarPendienteAlta(
+  telefono: string,
+  sesion: Sesion,
+  datos: DatosClienteEscritos,
+  motivo: "sin_coincidencia" | "ambiguo" | "rechazo" | "error"
+) {
+  const cliente: ClienteChat = { estado: "pendiente_alta", datos, motivo };
+  const contexto = { ...contextoBase(sesion), cliente };
+  await actualizarSesion(telefono, { estadoActual: "ARMANDO_PEDIDO", contexto });
+  await sendTextMessage(
+    telefono,
+    "No pudimos encontrarte con seguridad en nuestra base de clientes. Igual tomamos tu pedido: " +
+      "al confirmarlo, alguien del equipo te va a contactar para registrarte o verificar tus datos."
+  );
+  await mostrarResumenPedido(telefono, { ...sesion, contexto });
+}
+
+function textoDatosCliente(cliente: ClienteChat | undefined): string {
+  const d = cliente?.estado === "pendiente_alta" ? cliente.datos : {};
+  return (
+    [
+      d.nombre && `Nombre / razón social: ${d.nombre}`,
+      d.cuit && `CUIT: ${d.cuit}`,
+      d.direccion && `Dirección: ${d.direccion}${d.localidad ? `, ${d.localidad}` : ""}`,
+    ]
+      .filter(Boolean)
+      .join("\n") || "(no dejó datos)"
+  );
+}
+
+/** Guarda el pedido confirmado (para la NPW o para el alta). Devuelve el id, o null si falló. */
+async function guardarPedido(sesion: Sesion, estado: "identificado" | "pendiente_alta"): Promise<number | null> {
+  const cliente = obtenerClienteChat(sesion);
+  try {
+    const pedido = await prisma.pedidoWhatsApp.create({
+      data: {
+        telefono: sesion.telefono,
+        estado,
+        cliCod: cliente?.estado === "identificado" ? cliente.codigo : null,
+        cliRazSoc: cliente?.estado === "identificado" ? cliente.razonSocial : null,
+        clienteDatos: (cliente?.estado === "pendiente_alta" ? cliente.datos : cliente ?? {}) as Prisma.InputJsonValue,
+        carrito: sesion.carritoActual as unknown as Prisma.InputJsonValue,
+        entrega: (obtenerDatosEntrega(sesion) ?? {}) as Prisma.InputJsonValue,
+      },
+      select: { id: true },
+    });
+    return pedido.id;
+  } catch (err) {
+    console.error("[whatsapp] No se pudo guardar el pedido:", err);
+    return null;
   }
 }
 
@@ -2260,10 +2583,11 @@ async function ofrecerFueraDeZona(telefono: string, sesion: Sesion) {
  * resumen; si no, pide el primer producto.
  */
 async function continuarTrasEntrega(telefono: string, sesion: Sesion, datosEntrega: DatosEntrega) {
-  await actualizarSesion(telefono, { estadoActual: "ARMANDO_PEDIDO", contexto: { datosEntrega } });
+  const contexto = { ...contextoBase(sesion), datosEntrega };
+  await actualizarSesion(telefono, { estadoActual: "ARMANDO_PEDIDO", contexto });
 
   if (sesion.carritoActual.length > 0) {
-    await mostrarResumenPedido(telefono, { ...sesion, contexto: { datosEntrega } });
+    await mostrarResumenPedido(telefono, { ...sesion, contexto });
     return;
   }
 
@@ -2373,11 +2697,22 @@ async function mostrarResumenPedido(telefono: string, sesion: Sesion) {
     return;
   }
 
+  // Para cargar la NPW hace falta saber qué cliente de Bejerman es.
+  const cliente = obtenerClienteChat(sesion);
+  if (!cliente) {
+    await iniciarIdentificacion(telefono, sesion);
+    return;
+  }
+
   await actualizarSesion(telefono, { estadoActual: "ESPERANDO_CONFIRMACION" });
 
+  const lineaCliente =
+    cliente.estado === "identificado"
+      ? `Cliente: ${cliente.razonSocial}`
+      : `Cliente: a registrar por nuestro equipo${cliente.datos.nombre ? ` (${cliente.datos.nombre})` : ""}`;
   const detalle =
     `*Resumen de tu pedido*\n\n${lineasCarrito(sesion.carritoActual)}\n\n` +
-    `Total: ${textoTotal(sesion.carritoActual)}\n\n${textoEntrega(datosEntrega)}`;
+    `Total: ${textoTotal(sesion.carritoActual)}\n\n${lineaCliente}\n${textoEntrega(datosEntrega)}`;
 
   await sendButtons(telefono, await cuerpoInteractivo(telefono, detalle, "¿Confirmamos el pedido?"), [
     { id: "CONFIRMAR_PEDIDO", title: "Confirmar" },
@@ -2404,16 +2739,33 @@ async function confirmarPedido(telefono: string, sesion: Sesion) {
 
   const datosEntrega = obtenerDatosEntrega(sesion);
   const consultas = sesion.carritoActual.filter((it) => it.consulta);
+  const cliente = obtenerClienteChat(sesion);
+  const identificado = cliente?.estado === "identificado" ? cliente : null;
+
+  // Queda guardado para generar la NPW (identificado) o para que el equipo
+  // dé de alta al cliente (pendiente_alta). Si falla, el mail igual sale.
+  const idPedido = await guardarPedido(sesion, identificado ? "identificado" : "pendiente_alta");
+
+  const bloqueCliente = identificado
+    ? `Cliente Bejerman: ${identificado.codigo} — ${identificado.razonSocial} (${identificado.via}). Lista: ${identificado.listaPrecios}.`
+    : `⚠️ Cliente NO identificado en Bejerman (${cliente?.estado === "pendiente_alta" ? cliente.motivo : "sin datos"}). ` +
+      `No se genera NPW: dar de alta o verificar.\nDatos que escribió:\n${textoDatosCliente(cliente)}`;
+
+  const avisos = [
+    !identificado ? "Alta de cliente" : null,
+    consultas.length > 0 ? "productos a consultar" : null,
+  ].filter(Boolean);
 
   await avisarAtencion(
     sesion,
-    `Confirmó un pedido por WhatsApp.\n\nPedido:\n${lineasCarrito(sesion.carritoActual)}\n` +
+    `Confirmó un pedido por WhatsApp${idPedido ? ` (pedido #${idPedido})` : ""}.\n\n${bloqueCliente}\n\n` +
+      `Pedido:\n${lineasCarrito(sesion.carritoActual)}\n` +
       `Total: ${textoTotal(sesion.carritoActual)}` +
       (datosEntrega ? `\n\nEntrega:\n${textoEntrega(datosEntrega)}` : "") +
       (consultas.length > 0
         ? `\n\n⚠️ Hay ${consultas.length} producto(s) a consultar: escribirle al cliente para resolverlos.`
         : ""),
-    consultas.length > 0 ? "Pedido con productos a consultar" : "Pedido confirmado"
+    avisos.length > 0 ? `Pedido — ${avisos.join(" y ")}` : "Pedido confirmado"
   );
 
   if (datosEntrega?.tipo === "RETIRO") {
@@ -2432,6 +2784,14 @@ async function confirmarPedido(telefono: string, sesion: Sesion) {
     await sendTextMessage(
       telefono,
       "¡Gracias! Todavía estoy aprendiendo a cargar el pedido directo en el sistema — por ahora, alguien del equipo te va a confirmar el pedido a la brevedad."
+    );
+  }
+
+  if (!identificado) {
+    await sendTextMessage(
+      telefono,
+      "Como no te encontramos en nuestra base de clientes, alguien del equipo te va a contactar " +
+        "para registrarte y confirmar el pedido."
     );
   }
 

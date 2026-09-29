@@ -29,7 +29,7 @@ Sistema interno: costos, dashboards, producción e integración con Bejerman. Ha
 - Desde el 16/09/2026, CabMovS y MovStock tienen triggers de auditoría STA_AUDIT_*: usar `OUTPUT INSERTED.x INTO @tabla` + SELECT, nunca `OUTPUT` a secas.
 - UM2 = proporción de la fila origen (sdv_CantUM2/sdv_CantUM1), no el factor del maestro.
 - FIFO de partidas por stp_FechVtoIng; lote de producción DDMMAAAA.
-- Listas de precios: FIN = venta a clientes, SIV = costo interno. **Nunca exponer SIV a clientes** (chatbot incluido).
+- Listas de precios: FIN = precio con IVA; SIV = el mismo precio **sin IVA** (FIN = SIV × 1,21, verificado 29/09/2026). SIV es la lista asignada a la mayoría de los clientes responsables inscriptos (140 de 168 activos). El chat muestra FIN; la NPW usa la lista de la ficha del cliente (`clidlp_Cod`).
 
 ## Convenciones de código
 - Decimal: `.toNumber()` al serializar, `new Prisma.Decimal()` al persistir. Date → ISO string antes de pasarla a Client Components.
@@ -58,6 +58,13 @@ Sistema interno: costos, dashboards, producción e integración con Bejerman. Ha
    - Probar sin mandar nada a Meta: `node node_modules/tsx/dist/cli.mjs --tsconfig tsconfig.json scripts/simular-chat.ts "hola" "#HACER_PEDIDO" ...` (`#ID` = botón/fila; usa el teléfono 5490000000000 y borra su sesión).
    - Saludo: solo resetea si el mensaje entero es un saludo; "Hola, necesito X" busca X.
 
+### Identificación del cliente y NPW
+- Las NP del bot van en un comprobante propio **NPW** (lo crea Hernán en Bejerman), así el BP automático (NP pvt 00001, CUIT 00000000, tdc 39) no las procesa.
+- Antes del resumen se resuelve el cliente (`lib/whatsapp/bejerman-clientes.ts`, solo lectura, caché 5 min): vínculo guardado WhatsApp → cliente (`whatsapp_clientes`) o verificación con razón social/nombre + dirección (+ teléfono, CUIT). Identifica solo si **un único** cliente cumple 2 señales fuertes (dirección = número + palabra de calle; nombre = 2 palabras o 1 poco frecuente, ≤8 clientes; teléfono = últimos 7 dígitos; CUIT exacto). Nunca se muestra una lista de clientes.
+- Sin identificación segura → `pendiente_alta`: no se genera NPW; mail "Alta de cliente" con lo que escribió.
+- Cada pedido confirmado queda en `whatsapp_pedidos` (estado `identificado` / `pendiente_alta` / `npw_creada` / `error`): una NPW por pedido, nunca dos.
+- Datos de Clientes: `cli_Activo` = 'N' en todos (no usar), filtrar por `cli_Habilitado`. Solo ~14 % tiene celular en `cli_Tel`; `cli_Calle`/`cli_Numero` vacíos (la dirección está en `cli_Direc`).
+
 ### Artículos con variantes
 - En Bejerman, `Articulos` tiene una fila por variante (`art_CodEle1/2/3`, descripción en `artele_Desc1/2/3`); precio (`ListaPrec`) y stock (`Stock`/`StockPar`) también van por variante. `art_Gen = 1` marca una sola fila por CodGen.
 - Vendibles con variantes: ROP (talle + color, Ele1+Ele2), HOJ (medida), DIS (número), VAI. ~779 variantes.
@@ -69,7 +76,7 @@ Sistema interno: costos, dashboards, producción e integración con Bejerman. Ha
 - Migraciones: las tablas `whatsapp_*` se crearon con `db push` → **nunca `prisma migrate dev`** (propondría reset). Escribir la migración a mano y aplicar con `prisma migrate deploy`.
 
 ## Pendientes
-1. Chatbot: que CONFIRMAR_PEDIDO cree la NP real en Bejerman (SegCabV/SegDetV + asociadas). Primero mapear contra una NP cargada a mano y mostrar el plan de inserts.
+1. Chatbot: generar la **NPW** en Bejerman para los pedidos `identificado` de `whatsapp_pedidos` (SegCabV/SegDetV + asociadas). Etapa 1 hecha (identificación + tabla de pedidos). Falta: Hernán crea el comprobante NPW y carga uno a mano → mapear contra esa NPW y mostrar el plan de inserts (lista de precios del cliente, variantes con CodEle ' ', UM2, numeración con applock, idempotencia, consultas y productos sin precio fuera del detalle).
 2. Planilla: verificar en uso real que el botón crea la OP y muestra el resultado (el flujo ya está implementado).
 3. BP (postergado): el join a Stock en `baja-np-prueba.ts` (~l.63) no usa ISNULL/LTRIM, y SegDetV copia `sdvart_CodEle*` de la NP. Si la NP tiene NULL → "sin items con stock disponible" repetido y el BP queda con NULL.
 4. Chatbot: navegación del catálogo por categorías.

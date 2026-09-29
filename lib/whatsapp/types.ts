@@ -64,6 +64,9 @@ export type ConversationState =
   | "ESPERANDO_DIRECCION"
   | "ESPERANDO_LOCALIDAD" // reparto con dirección escrita sin localidad reconocible
   | "ESPERANDO_CONFIRMACION"
+  | "ESPERANDO_CLIENTE_NOMBRE" // identificación: razón social / nombre del comercio (o CUIT)
+  | "ESPERANDO_CLIENTE_DIRECCION" // identificación: dirección del comercio
+  | "ESPERANDO_CONFIRMAR_CLIENTE" // identificación: "¿El pedido es para X?"
   | "CONSULTA_LIBRE"
   | "ESPERANDO_ASUNTO_ATENCION" // "Hablar con persona": eligiendo el tema
   | "ESPERANDO_MENSAJE_ATENCION" // "Hablar con persona": falta escribir la consulta
