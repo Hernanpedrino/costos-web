@@ -14,6 +14,8 @@ export interface FechaEntrega {
   esHoy: boolean;
   /** Texto listo para mostrarle al cliente: "hoy" o el nombre del día ("lunes", "martes", ...). */
   etiqueta: string;
+  /** Días desde `ahora` hasta el reparto (0 = hoy): para grabar la fecha de entrega en la NPW. */
+  diasHasta: number;
 }
 
 /**
@@ -44,16 +46,18 @@ export function calcularFechaEntrega(ahora: Date = new Date()): FechaEntrega {
   const esHabil = (dia: number) => DIAS_HABILES_REPARTO.includes(dia);
 
   if (esHabil(diaActual) && minutosActuales < minutosCorte) {
-    return { esHoy: true, etiqueta: "hoy" };
+    return { esHoy: true, etiqueta: "hoy", diasHasta: 0 };
   }
 
   // Buscar el próximo día hábil de reparto (salta fines de semana).
   let diaEntrega = diaActual;
+  let diasHasta = 0;
   do {
     diaEntrega = (diaEntrega + 1) % 7;
+    diasHasta++;
   } while (!esHabil(diaEntrega));
 
-  return { esHoy: false, etiqueta: NOMBRES_DIA[diaEntrega] };
+  return { esHoy: false, etiqueta: NOMBRES_DIA[diaEntrega], diasHasta };
 }
 
 /** Datos fijos del local, para el mensaje de confirmación de retiro. */
