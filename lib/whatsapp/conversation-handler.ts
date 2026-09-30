@@ -2004,6 +2004,26 @@ async function iniciarIdentificacion(telefono: string, sesion: Sesion) {
     console.error("[whatsapp] No se pudieron leer los vínculos de cliente:", err);
   }
 
+  // En reparto, lo que acaba de escribir (local + dirección de entrega) manda
+  // sobre el vínculo guardado: puede estar comprando para otro comercio.
+  const entregaReparto = obtenerDatosEntrega(sesion);
+  if (vinculos.length > 0 && entregaReparto?.tipo === "REPARTO") {
+    try {
+      const r = await identificarCliente({
+        telefono,
+        nombre: entregaReparto.nombreLocal,
+        direccion: entregaReparto.direccion,
+        localidad: entregaReparto.localidad,
+      });
+      if (r.estado === "identificado" && !vinculos.some((v) => v.cliCod === r.cliente.codigo)) {
+        await proponerCliente(telefono, sesion, r.cliente.codigo, r.cliente.razonSocial, `verificado por ${r.senales.join(" + ")}`, "Te encontramos como");
+        return;
+      }
+    } catch (err) {
+      console.error("[whatsapp] Error identificando cliente en Bejerman:", err);
+    }
+  }
+
   if (vinculos.length === 1) {
     await proponerCliente(telefono, sesion, vinculos[0].cliCod, vinculos[0].cliRazSoc, "vinculo", "¿El pedido es para");
     return;
@@ -2057,25 +2077,24 @@ async function procesarNombreCliente(telefono: string, texto: string, sesion: Se
   const nombre = texto.replace(RE_CUIT, " ").replace(/\bcuit\b:?/i, " ").replace(/\s+/g, " ").trim();
   const datos: DatosClienteEscritos = { ...datosClienteDe(sesion), telefono, nombre: nombre || undefined, cuit };
 
-  // Reparto: primero con la dirección de entrega (suele ser la del comercio).
+  // Reparto: la dirección ya la dio al elegir la entrega; no se vuelve a
+  // pedir. Si con el nombre y esa dirección no se lo encuentra, lo resuelve
+  // el equipo.
   const entrega = obtenerDatosEntrega(sesion);
   if (entrega?.tipo === "REPARTO" && entrega.direccion) {
     const conEntrega = { ...datos, direccion: entrega.direccion, localidad: entrega.localidad };
     if (await intentarIdentificacion(telefono, sesion, conEntrega)) return;
-  } else if (cuit && (await intentarIdentificacion(telefono, sesion, datos))) {
-    return; // CUIT + nombre ya alcanza
+    await marcarPendienteAlta(telefono, sesion, conEntrega, "sin_coincidencia");
+    return;
   }
+  if (cuit && (await intentarIdentificacion(telefono, sesion, datos))) return; // CUIT + nombre ya alcanza
 
+  // Retiro o transporte: no hubo dirección de entrega → se pide una sola vez.
   await actualizarSesion(telefono, {
     estadoActual: "ESPERANDO_CLIENTE_DIRECCION",
     contexto: { ...contextoBase(sesion), clienteDatos: datos },
   });
-  await sendTextMessage(
-    telefono,
-    entrega?.tipo === "REPARTO"
-      ? "¿Cuál es la dirección del comercio registrada con nosotros? (calle y número; puede ser distinta a la de entrega)"
-      : "¿Cuál es la dirección del comercio? (calle y número)"
-  );
+  await sendTextMessage(telefono, "¿Cuál es la dirección del comercio? (calle y número)");
 }
 
 async function procesarDireccionCliente(telefono: string, texto: string, sesion: Sesion) {
